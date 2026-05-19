@@ -162,6 +162,7 @@ async def run() -> None:
                     dry_run,
                 ],
                 id=f"check-{site.name}",
+                name=f"check-{site.name}",
                 max_instances=1,
                 replace_existing=True,
             )
