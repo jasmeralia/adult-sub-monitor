@@ -55,6 +55,16 @@ def test_build_site_unknown_type_raises() -> None:
 
 def test_build_site_known_types() -> None:
     venus_config = build_site_config()
+    wowgirls_config = SiteConfig(
+        name="wowgirls-test",
+        type="wowgirls_platform",
+        base_url="https://venus.wowgirls.com",
+        login_url="https://venus.wowgirls.com/login",
+        probe_url="https://venus.wowgirls.com/updates/",
+        listing_url="https://venus.wowgirls.com/updates/",
+        credentials_env_user="WOWGIRLS_USERNAME",
+        credentials_env_pass="WOWGIRLS_PASSWORD",
+    )
     deeper_config = SiteConfig(
         name="deeper-test",
         type="vixen_media_group_platform",
@@ -67,7 +77,43 @@ def test_build_site_known_types() -> None:
     )
 
     assert _build_site(venus_config).name == "test_site"
+    assert _build_site(wowgirls_config).name == "wowgirls-test"
     assert _build_site(deeper_config).name == "deeper-test"
+
+
+@pytest.mark.asyncio
+async def test_run_once_skips_disabled_sites(mocker, monkeypatch) -> None:
+    monkeypatch.setenv("RUN_ONCE", "1")
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.example/webhook")
+    enabled_config = build_site_config("enabled_site")
+    disabled_config = SiteConfig(
+        name="disabled_site",
+        type="venus_platform",
+        base_url="https://example.com",
+        login_url="https://example.com/login",
+        probe_url="https://example.com/account",
+        listing_url="https://example.com/videos",
+        credentials_env_user="X",
+        credentials_env_pass="Y",
+        enabled=False,
+    )
+    sites = [build_site("enabled_site")]
+    config = build_config([enabled_config, disabled_config])
+    browser_manager = AsyncMock()
+
+    mocker.patch("adult_sub_monitor.main.load_config", return_value=config)
+    mocker.patch("adult_sub_monitor.main.Database")
+    mocker.patch("adult_sub_monitor.main.BrowserManager", return_value=browser_manager)
+    mocker.patch("adult_sub_monitor.main.send_video_notification", new=AsyncMock())
+    mocker.patch("adult_sub_monitor.main._build_site", side_effect=sites)
+    check_site = mocker.patch("adult_sub_monitor.main._check_site", new=AsyncMock())
+
+    from adult_sub_monitor.main import run
+
+    await run()
+
+    assert check_site.await_count == 1
+    assert check_site.await_args_list[0].args[0].name == "enabled_site"
 
 
 def test_scheduler_jitter_seconds_is_fixed_range() -> None:

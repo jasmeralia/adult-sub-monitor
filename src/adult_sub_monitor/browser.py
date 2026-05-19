@@ -25,7 +25,10 @@ class BrowserManager:
 
     async def start(self) -> None:
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=self.headless)
+        self._browser = await self._playwright.chromium.launch(
+            headless=self.headless,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
 
     async def stop(self) -> None:
         if self._browser is not None:

@@ -19,6 +19,7 @@ from adult_sub_monitor.models import Item, SiteConfig
 from adult_sub_monitor.sites.base import BaseSite
 from adult_sub_monitor.sites.venus_platform import VenusPlatformSite
 from adult_sub_monitor.sites.vixen_media_group_platform import VixenMediaGroupSite
+from adult_sub_monitor.sites.wowgirls_platform import WowgirlsPlatformSite
 
 logger = logging.getLogger(__name__)
 _site_locks: dict[str, asyncio.Lock] = {}
@@ -27,6 +28,8 @@ _site_locks: dict[str, asyncio.Lock] = {}
 def _build_site(site_config: SiteConfig) -> BaseSite:
     if site_config.type == "venus_platform":
         return VenusPlatformSite(site_config)
+    if site_config.type == "wowgirls_platform":
+        return WowgirlsPlatformSite(site_config)
     if site_config.type == "vixen_media_group_platform":
         return VixenMediaGroupSite(site_config)
 
@@ -124,11 +127,11 @@ async def run() -> None:
     webhook_url = os.environ.get(config.discord_webhook_env, config.discord_webhook_env)
     run_once = os.environ.get("RUN_ONCE") == "1"
     dry_run = os.environ.get("DRY_RUN") == "1"
-    sites = [_build_site(site_config) for site_config in config.sites]
+    active = [(sc, _build_site(sc)) for sc in config.sites if sc.enabled]
 
     try:
         if run_once:
-            for site, site_config in zip(sites, config.sites, strict=True):
+            for site_config, site in active:
                 await _check_site(
                     site,
                     site_config,
@@ -143,9 +146,7 @@ async def run() -> None:
         scheduler = AsyncIOScheduler()
         now = datetime.now()
 
-        for index, (site, site_config) in enumerate(
-            zip(sites, config.sites, strict=True),
-        ):
+        for index, (site_config, site) in enumerate(active):
             scheduler.add_job(
                 _check_site,
                 trigger=IntervalTrigger(

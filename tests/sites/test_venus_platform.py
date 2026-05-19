@@ -6,14 +6,6 @@ from adult_sub_monitor.models import Item, SiteConfig
 from adult_sub_monitor.sites.venus_platform import VenusPlatformSite
 
 
-class AsyncContextManager:
-    async def __aenter__(self) -> None:
-        return None
-
-    async def __aexit__(self, *_args: object) -> None:
-        return None
-
-
 def make_site() -> VenusPlatformSite:
     return VenusPlatformSite(
         SiteConfig(
@@ -21,230 +13,198 @@ def make_site() -> VenusPlatformSite:
             type="venus_platform",
             base_url="https://venus.example",
             login_url="https://venus.example/login",
-            probe_url="https://venus.example/account",
-            listing_url="https://venus.example/videos",
+            probe_url="https://venus.example/members/content",
+            listing_url="https://venus.example/members/content",
             credentials_env_user="VENUS_USER",
             credentials_env_pass="VENUS_PASS",
         )
     )
 
 
-def _page_with_cards(card_count: int) -> AsyncMock:
-    cards = [MagicMock(name=f"card-{index}") for index in range(card_count)]
-    card_locator = MagicMock()
-    card_locator.count = AsyncMock(return_value=card_count)
-    card_locator.nth = MagicMock(side_effect=lambda index: cards[index])
+def _make_thumb(
+    alt: str | None = "Video Title",
+    src: str | None = "https://cdn.example/thumb.jpg",
+) -> MagicMock:
+    thumb = MagicMock()
+    thumb.get_attribute = AsyncMock(side_effect=[alt, src])
+    return thumb
+
+
+def _make_card(
+    href: str | None = "/members/content/item/abc123-video-title",
+    alt: str | None = "Video Title",
+    src: str | None = "https://cdn.example/thumb.jpg",
+) -> MagicMock:
+    thumb = _make_thumb(alt, src)
+    thumb_locator = MagicMock()
+    thumb_locator.count = AsyncMock(return_value=1 if alt is not None else 0)
+    thumb_locator.first = thumb
+
+    card = MagicMock()
+    card.get_attribute = AsyncMock(return_value=href)
+    card.locator = MagicMock(return_value=thumb_locator)
+    return card
+
+
+def _make_page(*cards: MagicMock) -> AsyncMock:
+    card_list = MagicMock()
+    card_list.count = AsyncMock(return_value=len(cards))
+    card_list.nth = MagicMock(side_effect=lambda i: cards[i])
 
     page = AsyncMock()
-    page.goto = AsyncMock()
-    page.locator = MagicMock(return_value=card_locator)
+    page.locator = MagicMock(return_value=card_list)
     return page
 
 
 @pytest.mark.asyncio
-async def test_get_latest_items_all_videos(mocker) -> None:
+async def test_login_navigates_fills_and_waits() -> None:
     site = make_site()
-    page = _page_with_cards(2)
-    mocker.patch.object(site, "_is_video_card", AsyncMock(return_value=True))
-    mocker.patch.object(
-        site,
-        "_first_text",
-        AsyncMock(side_effect=["First Video", "Second Video"]),
-    )
-    mocker.patch.object(
-        site,
-        "_first_attribute",
-        AsyncMock(
-            side_effect=[
-                "/videos/1",
-                "/thumbs/1.jpg",
-                "/videos/2",
-                "/thumbs/2.jpg",
-            ]
-        ),
-    )
-    mocker.patch.object(
-        site,
-        "_all_text",
-        AsyncMock(side_effect=[["Performer A"], ["Tag A"], ["Performer B"], ["Tag B"]]),
-    )
-
-    items = await site.get_latest_items(page)
-
-    assert len(items) == 2
-    assert all(isinstance(item, Item) for item in items)
-    assert [item.site_name for item in items] == ["venus-test", "venus-test"]
-    assert [item.title for item in items] == ["First Video", "Second Video"]
-
-
-@pytest.mark.asyncio
-async def test_get_latest_items_filters_non_video(mocker) -> None:
-    site = make_site()
-    page = _page_with_cards(3)
-    mocker.patch.object(
-        site,
-        "_is_video_card",
-        AsyncMock(side_effect=[True, False, True]),
-    )
-    mocker.patch.object(
-        site,
-        "_first_text",
-        AsyncMock(side_effect=["First Video", "Third Video"]),
-    )
-    mocker.patch.object(
-        site,
-        "_first_attribute",
-        AsyncMock(
-            side_effect=[
-                "/videos/1",
-                "/thumbs/1.jpg",
-                "/videos/3",
-                "/thumbs/3.jpg",
-            ]
-        ),
-    )
-    mocker.patch.object(
-        site,
-        "_all_text",
-        AsyncMock(side_effect=[["Performer A"], ["Tag A"], ["Performer C"], ["Tag C"]]),
-    )
-
-    items = await site.get_latest_items(page)
-
-    assert len(items) == 2
-    assert [item.title for item in items] == ["First Video", "Third Video"]
-    assert [item.site_name for item in items] == ["venus-test", "venus-test"]
-
-
-@pytest.mark.asyncio
-async def test_get_latest_items_empty_listing() -> None:
-    site = make_site()
-    page = _page_with_cards(0)
-
-    assert await site.get_latest_items(page) == []
-
-
-@pytest.mark.asyncio
-async def test_is_logged_in_true() -> None:
-    site = make_site()
-    indicator = MagicMock()
-    indicator.count = AsyncMock(return_value=1)
     page = AsyncMock()
-    page.locator = MagicMock(return_value=indicator)
+
+    await site.login(page, "user@example.test", "secret")
+
+    page.goto.assert_awaited_once_with(
+        "https://venus.example/login", wait_until="domcontentloaded"
+    )
+    page.fill.assert_any_await("#inputEmail", "user@example.test")
+    page.fill.assert_any_await("#inputPassword", "secret")
+    page.click.assert_awaited_once_with(".submit-button")
+    page.wait_for_function.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_is_logged_in_true_when_not_on_login_page() -> None:
+    site = make_site()
+    page = MagicMock()
+    page.url = "https://venus.example/members/content"
 
     assert await site.is_logged_in(page) is True
 
 
 @pytest.mark.asyncio
-async def test_is_logged_in_false() -> None:
+async def test_is_logged_in_false_when_on_login_page() -> None:
     site = make_site()
-    indicator = MagicMock()
-    indicator.count = AsyncMock(return_value=0)
-    page = AsyncMock()
-    page.locator = MagicMock(return_value=indicator)
+    page = MagicMock()
+    page.url = "https://venus.example/login"
 
     assert await site.is_logged_in(page) is False
 
 
 @pytest.mark.asyncio
-async def test_login_success(mocker) -> None:
+async def test_get_latest_items_returns_video_cards() -> None:
     site = make_site()
-    page = AsyncMock()
-    page.expect_navigation = MagicMock(return_value=AsyncContextManager())
-    mocker.patch.object(site, "is_logged_in", AsyncMock(return_value=True))
+    card1 = _make_card(
+        "/members/content/item/abc-first-video",
+        "First Video",
+        "https://cdn.example/1.jpg",
+    )
+    card2 = _make_card(
+        "/members/content/item/def-second-video",
+        "Second Video",
+        "https://cdn.example/2.jpg",
+    )
+    page = _make_page(card1, card2)
 
-    await site.login(page, "user@example.test", "secret")
+    items = await site.get_latest_items(page)
 
-    assert page.fill.await_count == 2
-    page.click.assert_awaited_once()
-    page.expect_navigation.assert_called_once_with(wait_until="domcontentloaded")
+    assert len(items) == 2
+    assert all(isinstance(item, Item) for item in items)
+    assert items[0].title == "First Video"
+    assert items[1].title == "Second Video"
+    assert items[0].site_name == "venus-test"
 
 
 @pytest.mark.asyncio
-async def test_login_failure_raises(mocker) -> None:
+async def test_get_latest_items_absolute_url() -> None:
     site = make_site()
-    page = AsyncMock()
-    page.expect_navigation = MagicMock(return_value=AsyncContextManager())
-    mocker.patch.object(site, "is_logged_in", AsyncMock(return_value=False))
+    card = _make_card(
+        "/members/content/item/abc123-naughty-sweetness", "Naughty Sweetness"
+    )
+    page = _make_page(card)
 
-    with pytest.raises(RuntimeError, match="Login failed for venus-test"):
-        await site.login(page, "user@example.test", "secret")
+    items = await site.get_latest_items(page)
+
+    assert len(items) == 1
+    assert (
+        str(items[0].url)
+        == "https://venus.example/members/content/item/abc123-naughty-sweetness"
+    )
+    assert (
+        items[0].item_id
+        == "https://venus.example/members/content/item/abc123-naughty-sweetness"
+    )
 
 
 @pytest.mark.asyncio
-async def test_get_latest_items_skips_missing_title_or_url(mocker) -> None:
+async def test_get_latest_items_empty_listing() -> None:
     site = make_site()
-    page = _page_with_cards(2)
-    mocker.patch.object(site, "_is_video_card", AsyncMock(return_value=True))
-    mocker.patch.object(site, "_first_text", AsyncMock(side_effect=[None, "Has Title"]))
-    mocker.patch.object(site, "_first_attribute", AsyncMock(return_value=None))
+    page = _make_page()
 
     assert await site.get_latest_items(page) == []
 
 
 @pytest.mark.asyncio
-async def test_is_video_card_uses_card_match_signal() -> None:
+async def test_get_latest_items_skips_card_without_href() -> None:
     site = make_site()
-    card = MagicMock()
-    card.evaluate = AsyncMock(return_value=True)
+    card = _make_card(href=None)
+    page = _make_page(card)
 
-    assert await site._is_video_card(card) is True
-    card.evaluate.assert_awaited_once()
+    assert await site.get_latest_items(page) == []
 
 
 @pytest.mark.asyncio
-async def test_first_text_returns_stripped_text_or_none() -> None:
+async def test_get_latest_items_skips_card_without_thumbnail() -> None:
     site = make_site()
-    locator = MagicMock()
-    locator.count = AsyncMock(return_value=1)
-    locator.first.inner_text = AsyncMock(return_value="  Video Title  ")
-    card = MagicMock()
-    card.locator = MagicMock(return_value=locator)
+    card = _make_card(alt=None)
+    page = _make_page(card)
 
-    assert await site._first_text(card, ".title") == "Video Title"
-
-    empty_locator = MagicMock()
-    empty_locator.count = AsyncMock(return_value=0)
-    card.locator = MagicMock(return_value=empty_locator)
-
-    assert await site._first_text(card, ".missing") is None
+    assert await site.get_latest_items(page) == []
 
 
 @pytest.mark.asyncio
-async def test_first_attribute_returns_stripped_attribute_or_none() -> None:
+async def test_get_latest_items_skips_card_without_title() -> None:
     site = make_site()
-    locator = MagicMock()
-    locator.count = AsyncMock(return_value=1)
-    locator.first.get_attribute = AsyncMock(return_value="  /videos/1  ")
+    thumb = MagicMock()
+    thumb.get_attribute = AsyncMock(side_effect=[None, "https://cdn.example/thumb.jpg"])
+    thumb_locator = MagicMock()
+    thumb_locator.count = AsyncMock(return_value=1)
+    thumb_locator.first = thumb
+
     card = MagicMock()
-    card.locator = MagicMock(return_value=locator)
+    card.get_attribute = AsyncMock(return_value="/members/content/item/abc")
+    card.locator = MagicMock(return_value=thumb_locator)
+    page = _make_page(card)
 
-    assert await site._first_attribute(card, "a", "href") == "/videos/1"
-
-    locator.first.get_attribute = AsyncMock(return_value=None)
-
-    assert await site._first_attribute(card, "a", "href") is None
-
-    empty_locator = MagicMock()
-    empty_locator.count = AsyncMock(return_value=0)
-    card.locator = MagicMock(return_value=empty_locator)
-
-    assert await site._first_attribute(card, "a", "href") is None
+    assert await site.get_latest_items(page) == []
 
 
 @pytest.mark.asyncio
-async def test_all_text_returns_non_empty_stripped_values() -> None:
+async def test_get_latest_items_no_thumbnail_url() -> None:
     site = make_site()
-    first = MagicMock()
-    first.inner_text = AsyncMock(return_value="  Performer A  ")
-    second = MagicMock()
-    second.inner_text = AsyncMock(return_value="  ")
-    third = MagicMock()
-    third.inner_text = AsyncMock(return_value="Performer B")
-    locator = MagicMock()
-    locator.count = AsyncMock(return_value=3)
-    locator.nth = MagicMock(side_effect=[first, second, third])
-    card = MagicMock()
-    card.locator = MagicMock(return_value=locator)
+    thumb = MagicMock()
+    thumb.get_attribute = AsyncMock(side_effect=["My Video", None])
+    thumb_locator = MagicMock()
+    thumb_locator.count = AsyncMock(return_value=1)
+    thumb_locator.first = thumb
 
-    assert await site._all_text(card, ".performer") == ["Performer A", "Performer B"]
+    card = MagicMock()
+    card.get_attribute = AsyncMock(return_value="/members/content/item/abc")
+    card.locator = MagicMock(return_value=thumb_locator)
+    page = _make_page(card)
+
+    items = await site.get_latest_items(page)
+
+    assert len(items) == 1
+    assert items[0].thumbnail_url is None
+
+
+@pytest.mark.asyncio
+async def test_get_latest_items_performers_and_tags_empty() -> None:
+    site = make_site()
+    card = _make_card()
+    page = _make_page(card)
+
+    items = await site.get_latest_items(page)
+
+    assert items[0].performers == []
+    assert items[0].tags == []

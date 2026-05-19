@@ -1,18 +1,22 @@
 from urllib.parse import urljoin
 
-from playwright.async_api import Page
+from playwright.async_api import Locator, Page
 
 from adult_sub_monitor.models import Item, SiteConfig
 from adult_sub_monitor.sites.base import BaseSite
 
-LOGIN_EMAIL_SELECTOR = "#inputEmail"
-LOGIN_PASSWORD_SELECTOR = "#inputPassword"
-LOGIN_SUBMIT_SELECTOR = ".submit-button"
-VIDEO_CARD_SELECTOR = "a:has(.the-tile.video-content-tile)"
-THUMBNAIL_SELECTOR = "img.thumb"
+LOGIN_EMAIL_SELECTOR = "#user-email"
+LOGIN_PASSWORD_SELECTOR = "#user-password"
+LOGIN_SUBMIT_SELECTOR = ".loginform-submit-button"
+VIDEO_CARD_SELECTOR = ".content_item.ct_video"
+VIDEO_URL_SELECTOR = "a.icon[href*='/film/']"
+VIDEO_TITLE_SELECTOR = "a.title"
+THUMBNAIL_SELECTOR = "span.thumb img"
+PERFORMERS_SELECTOR = "span.models a"
+TAGS_SELECTOR = "span.genres a"
 
 
-class VenusPlatformSite(BaseSite):
+class WowgirlsPlatformSite(BaseSite):
     def __init__(self, site_config: SiteConfig):
         self.name = site_config.name
         self.base_url = str(site_config.base_url)
@@ -42,17 +46,25 @@ class VenusPlatformSite(BaseSite):
 
         for index in range(count):
             card = cards.nth(index)
-            href = await card.get_attribute("href")
+
+            url_locator = card.locator(VIDEO_URL_SELECTOR)
+            if await url_locator.count() == 0:
+                continue
+            href = await url_locator.first.get_attribute("href")
             if not href:
                 continue
 
-            thumb_locator = card.locator(THUMBNAIL_SELECTOR)
-            if await thumb_locator.count() == 0:
-                continue
+            title_locator = card.locator(VIDEO_TITLE_SELECTOR)
+            title: str | None = None
+            if await title_locator.count() > 0:
+                title = (await title_locator.first.inner_text()).strip() or None
 
-            thumb = thumb_locator.first
-            title = await thumb.get_attribute("alt")
-            thumbnail_src = await thumb.get_attribute("src")
+            img_locator = card.locator(THUMBNAIL_SELECTOR)
+            thumbnail_src: str | None = None
+            if await img_locator.count() > 0:
+                if not title:
+                    title = await img_locator.first.get_attribute("alt")
+                thumbnail_src = await img_locator.first.get_attribute("src")
 
             if not title:
                 continue
@@ -69,9 +81,18 @@ class VenusPlatformSite(BaseSite):
                     title=title,
                     url=absolute_url,
                     thumbnail_url=absolute_thumbnail,
-                    performers=[],
-                    tags=[],
+                    performers=await self._all_text(card, PERFORMERS_SELECTOR),
+                    tags=await self._all_text(card, TAGS_SELECTOR),
                 )
             )
 
         return items
+
+    async def _all_text(self, card: Locator, selector: str) -> list[str]:
+        locator = card.locator(selector)
+        values: list[str] = []
+        for i in range(await locator.count()):
+            text = (await locator.nth(i).inner_text()).strip()
+            if text:
+                values.append(text)
+        return values
