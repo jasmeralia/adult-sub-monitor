@@ -1,35 +1,41 @@
 .PHONY: help venv install lint lint-fix test test-cov clean docker-build docker-run
 
 PYTHON := python3
-VENV := .venv
-VENV_BIN := $(VENV)/bin
+VENV   := .venv
+
+# Use venv tools when the venv exists (local dev); fall back to PATH otherwise (CI).
+ifneq ($(wildcard $(VENV)/bin/ruff),)
+BIN := $(VENV)/bin/
+else
+BIN :=
+endif
 
 help:
 	@echo "Targets: venv install lint lint-fix test test-cov clean docker-build docker-run"
 
 venv:
 	$(PYTHON) -m venv $(VENV)
-	$(VENV_BIN)/pip install --upgrade pip
+	$(VENV)/bin/pip install --upgrade pip
 
 install: venv
-	$(VENV_BIN)/pip install -e ".[dev]"
-	$(VENV_BIN)/playwright install chromium
+	$(VENV)/bin/pip install -e ".[dev]"
+	$(VENV)/bin/playwright install chromium
 
 lint:
-	$(VENV_BIN)/ruff check src tests
-	$(VENV_BIN)/ruff format --check src tests
-	$(VENV_BIN)/mypy src
-	$(VENV_BIN)/pylint src
+	$(BIN)ruff check src tests
+	$(BIN)ruff format --check src tests
+	$(BIN)mypy src
+	$(BIN)pylint src
 
 lint-fix:
-	$(VENV_BIN)/ruff check --fix src tests
-	$(VENV_BIN)/ruff format src tests
+	$(BIN)ruff check --fix src tests
+	$(BIN)ruff format src tests
 
 test:
-	$(VENV_BIN)/pytest
+	$(BIN)pytest
 
 test-cov:
-	$(VENV_BIN)/pytest --cov=adult_sub_monitor --cov-report=term-missing --cov-fail-under=80
+	$(BIN)pytest --cov=adult_sub_monitor --cov-report=term-missing --cov-fail-under=80
 
 clean:
 	rm -rf $(VENV) .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage
