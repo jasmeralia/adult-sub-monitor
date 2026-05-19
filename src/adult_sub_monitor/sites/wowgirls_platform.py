@@ -19,6 +19,7 @@ TAGS_SELECTOR = "span.genres a"
 class WowgirlsPlatformSite(BaseSite):
     def __init__(self, site_config: SiteConfig):
         self.name = site_config.name
+        self.display_name = site_config.display_name or site_config.name
         self.base_url = str(site_config.base_url)
         self.login_url = str(site_config.login_url)
         self.probe_url = str(site_config.probe_url)
@@ -76,7 +77,7 @@ class WowgirlsPlatformSite(BaseSite):
 
             items.append(
                 Item(
-                    site_name=self.name,
+                    site_name=self.display_name,
                     item_id=absolute_url,
                     title=title,
                     url=absolute_url,
