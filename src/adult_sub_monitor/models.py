@@ -16,7 +16,7 @@ class Item(BaseModel):
 
 class SiteConfig(BaseModel):
     name: str
-    type: Literal["venus_platform", "vixen_media_group_platform"]
+    type: Literal["venus_platform", "wowgirls_platform", "vixen_media_group_platform"]
     base_url: HttpUrl
     login_url: HttpUrl
     probe_url: HttpUrl
@@ -24,6 +24,7 @@ class SiteConfig(BaseModel):
     interval_hours: float = 6.0
     credentials_env_user: str
     credentials_env_pass: str
+    enabled: bool = True
 
 
 class AppConfig(BaseModel):

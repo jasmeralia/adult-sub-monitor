@@ -1,6 +1,7 @@
 sites:
   - name: tushy
     type: vixen_media_group_platform
+    enabled: false
     base_url: https://members.tushy.com
     login_url: https://members.tushy.com/login
     probe_url: https://members.tushy.com/videos
@@ -11,6 +12,7 @@ sites:
 
   - name: deeper
     type: vixen_media_group_platform
+    enabled: false
     base_url: https://members.deeper.com
     login_url: https://members.deeper.com/login
     probe_url: https://members.deeper.com/videos
@@ -23,18 +25,18 @@ sites:
     type: venus_platform
     base_url: https://venus.sensual.love
     login_url: https://venus.sensual.love/login
-    probe_url: https://venus.sensual.love/account
-    listing_url: https://venus.sensual.love/videos
+    probe_url: https://venus.sensual.love/members/content
+    listing_url: https://venus.sensual.love/members/content
     interval_hours: 6
     credentials_env_user: SENSUAL_USER
     credentials_env_pass: SENSUAL_PASS
 
   - name: wowgirls
-    type: venus_platform
+    type: wowgirls_platform
     base_url: https://venus.wowgirls.com
     login_url: https://venus.wowgirls.com/login
-    probe_url: https://venus.wowgirls.com/account
-    listing_url: https://venus.wowgirls.com/videos
+    probe_url: https://venus.wowgirls.com/updates/
+    listing_url: https://venus.wowgirls.com/updates/
     interval_hours: 6
     credentials_env_user: WOWGIRLS_USER
     credentials_env_pass: WOWGIRLS_PASS
@@ -43,8 +45,8 @@ sites:
     type: venus_platform
     base_url: https://venus.ultrafilms.com
     login_url: https://venus.ultrafilms.com/login
-    probe_url: https://venus.ultrafilms.com/account
-    listing_url: https://venus.ultrafilms.com/videos
+    probe_url: https://venus.ultrafilms.com/members/content
+    listing_url: https://venus.ultrafilms.com/members/content
     interval_hours: 6
     credentials_env_user: ULTRAFILMS_USER
     credentials_env_pass: ULTRAFILMS_PASS
@@ -53,8 +55,8 @@ sites:
     type: venus_platform
     base_url: https://venus.angels.love
     login_url: https://venus.angels.love/login
-    probe_url: https://venus.angels.love/account
-    listing_url: https://venus.angels.love/videos
+    probe_url: https://venus.angels.love/members/content
+    listing_url: https://venus.angels.love/members/content
     interval_hours: 6
     credentials_env_user: ANGELS_USER
     credentials_env_pass: ANGELS_PASS
