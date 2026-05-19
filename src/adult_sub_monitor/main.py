@@ -152,7 +152,7 @@ async def run() -> None:
                 trigger=IntervalTrigger(
                     hours=site_config.interval_hours,
                     jitter=_scheduler_jitter_seconds(),
-                    start_date=now + timedelta(seconds=index * 30),
+                    start_date=now + timedelta(seconds=30 + index * 30),
                 ),
                 args=[
                     site,
