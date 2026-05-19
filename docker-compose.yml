@@ -1,0 +1,12 @@
+services:
+  monitor:
+    image: ghcr.io/jasmeralia/adult-sub-monitor:latest
+    container_name: adult-sub-monitor
+    restart: unless-stopped
+    volumes:
+      - ./config:/config:ro
+      - ./data:/data
+    env_file:
+      - .env
+    environment:
+      - LOG_LEVEL=INFO
