@@ -62,6 +62,27 @@ async def test_429_retry_success() -> None:
 
 
 @pytest.mark.asyncio
+async def test_non_rate_limited_http_error_returns_false() -> None:
+    webhook_url = "https://discord.com/api/webhooks/test/server-error"
+
+    with aioresponses() as mocked:
+        mocked.post(webhook_url, status=500, body="server failed")
+
+        assert await send_video_notification(webhook_url, build_item()) is False
+
+
+@pytest.mark.asyncio
+async def test_429_retry_http_error_returns_false() -> None:
+    webhook_url = "https://discord.com/api/webhooks/test/retry-error"
+
+    with aioresponses() as mocked:
+        mocked.post(webhook_url, status=429, headers={"Retry-After": "0.01"})
+        mocked.post(webhook_url, status=503, body="still unavailable")
+
+        assert await send_video_notification(webhook_url, build_item()) is False
+
+
+@pytest.mark.asyncio
 async def test_network_error_returns_false() -> None:
     webhook_url = "https://discord.com/api/webhooks/test/error"
 

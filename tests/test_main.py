@@ -1,10 +1,16 @@
 import asyncio
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
 
-from adult_sub_monitor.main import _check_site
+from adult_sub_monitor.main import (
+    _build_site,
+    _check_site,
+    _scheduler_jitter_seconds,
+    _send_notification,
+)
 from adult_sub_monitor.models import AppConfig, Item, SiteConfig
 
 
@@ -37,6 +43,76 @@ def build_site_config(name: str = "test_site") -> SiteConfig:
         listing_url="https://example.com/videos",
         credentials_env_user="EXAMPLE_USERNAME",
         credentials_env_pass="EXAMPLE_PASSWORD",
+    )
+
+
+def test_build_site_unknown_type_raises() -> None:
+    site_config = cast(SiteConfig, SimpleNamespace(type="unknown", name="bad-site"))
+
+    with pytest.raises(ValueError, match="Unsupported site type: unknown"):
+        _build_site(site_config)
+
+
+def test_build_site_known_types() -> None:
+    venus_config = build_site_config()
+    deeper_config = SiteConfig(
+        name="deeper-test",
+        type="deeper_tushy",
+        base_url="https://deeper.example",
+        login_url="https://deeper.example/login",
+        probe_url="https://deeper.example/account",
+        listing_url="https://deeper.example/videos",
+        credentials_env_user="DEEPER_USERNAME",
+        credentials_env_pass="DEEPER_PASSWORD",
+    )
+
+    assert _build_site(venus_config).name == "test_site"
+    assert _build_site(deeper_config).name == "deeper-test"
+
+
+def test_scheduler_jitter_seconds_is_fixed_range() -> None:
+    assert _scheduler_jitter_seconds() == 900
+
+
+@pytest.mark.asyncio
+async def test_send_notification_success(mocker) -> None:
+    item = build_item()
+    mocker.patch(
+        "adult_sub_monitor.main.send_video_notification",
+        new=AsyncMock(return_value=True),
+    )
+
+    assert await _send_notification("https://discord.example/webhook", item) == (
+        True,
+        None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_notification_false_result(mocker) -> None:
+    item = build_item()
+    mocker.patch(
+        "adult_sub_monitor.main.send_video_notification",
+        new=AsyncMock(return_value=False),
+    )
+
+    assert await _send_notification("https://discord.example/webhook", item) == (
+        False,
+        "Discord notification helper returned False",
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_notification_exception(mocker) -> None:
+    item = build_item()
+    mocker.patch(
+        "adult_sub_monitor.main.send_video_notification",
+        new=AsyncMock(side_effect=RuntimeError("webhook exploded")),
+    )
+
+    assert await _send_notification("https://discord.example/webhook", item) == (
+        False,
+        "webhook exploded",
     )
 
 

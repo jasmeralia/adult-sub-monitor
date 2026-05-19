@@ -25,7 +25,7 @@ def _site_config() -> SimpleNamespace:
 
 
 async def _started_manager(
-    mocker, tmp_path, mock_context, mock_page
+    mocker, tmp_path, mock_context, mock_page, user_agent=None
 ) -> tuple[BrowserManager, AsyncMock]:
     mock_context.new_page = AsyncMock(return_value=mock_page)
     mock_context.storage_state = AsyncMock()
@@ -35,6 +35,7 @@ async def _started_manager(
 
     mock_playwright = MagicMock()
     mock_playwright.chromium.launch = AsyncMock(return_value=mock_browser)
+    mock_playwright.stop = AsyncMock()
 
     mock_playwright_manager = MagicMock()
     mock_playwright_manager.start = AsyncMock(return_value=mock_playwright)
@@ -45,9 +46,25 @@ async def _started_manager(
         return_value=mock_playwright_manager,
     )
 
-    manager = BrowserManager(tmp_path, headless=True, user_agent=None)
+    manager = BrowserManager(tmp_path, headless=True, user_agent=user_agent)
     await manager.start()
     return manager, mock_browser
+
+
+@pytest.mark.asyncio
+async def test_start_and_stop_launches_and_closes_browser(
+    mocker, tmp_path, mock_page
+) -> None:
+    mock_context = AsyncMock()
+    manager, mock_browser = await _started_manager(
+        mocker, tmp_path, mock_context, mock_page
+    )
+
+    await manager.stop()
+
+    mock_browser.close.assert_awaited_once_with()
+    assert manager._browser is None
+    assert manager._playwright is None
 
 
 @pytest.mark.asyncio
@@ -73,6 +90,39 @@ async def test_ensure_authenticated_cookie_restore(mocker, tmp_path, mock_page) 
 
 
 @pytest.mark.asyncio
+async def test_ensure_authenticated_cookie_restore_with_user_agent(
+    mocker, tmp_path, mock_page
+) -> None:
+    site = _site(AsyncMock(return_value=True))
+    site_config = _site_config()
+    storage_state_path = tmp_path / f"{site.name}.json"
+    storage_state_path.write_text("{}", encoding="utf-8")
+    mock_context = AsyncMock()
+    manager, mock_browser = await _started_manager(
+        mocker,
+        tmp_path,
+        mock_context,
+        mock_page,
+        user_agent="MonitorBot/1.0",
+    )
+
+    await manager.ensure_authenticated(site, site_config)
+
+    mock_browser.new_context.assert_awaited_once_with(
+        storage_state=str(storage_state_path),
+        user_agent="MonitorBot/1.0",
+    )
+
+
+@pytest.mark.asyncio
+async def test_ensure_authenticated_requires_start(tmp_path) -> None:
+    manager = BrowserManager(tmp_path, headless=True, user_agent=None)
+
+    with pytest.raises(RuntimeError, match=r"BrowserManager\.start"):
+        await manager.ensure_authenticated(_site(AsyncMock()), _site_config())
+
+
+@pytest.mark.asyncio
 async def test_ensure_authenticated_fresh_login(
     mocker, monkeypatch, tmp_path, mock_page
 ) -> None:
@@ -91,6 +141,31 @@ async def test_ensure_authenticated_fresh_login(
     assert context is mock_context
     site.login.assert_awaited_once_with(mock_page, "user", "pass")
     site.dismiss_interstitial.assert_awaited_once_with(mock_page)
+    mock_context.storage_state.assert_awaited_once_with(path=str(storage_state_path))
+
+
+@pytest.mark.asyncio
+async def test_ensure_authenticated_user_agent_without_storage_state(
+    mocker, tmp_path, mock_page
+) -> None:
+    site = _site(AsyncMock(return_value=True))
+    site_config = _site_config()
+    storage_state_path = tmp_path / f"{site.name}.json"
+    mock_context = AsyncMock()
+    manager, mock_browser = await _started_manager(
+        mocker,
+        tmp_path,
+        mock_context,
+        mock_page,
+        user_agent="MonitorBot/1.0",
+    )
+
+    context = await manager.ensure_authenticated(site, site_config)
+
+    assert context is mock_context
+    mock_browser.new_context.assert_awaited_once_with(user_agent="MonitorBot/1.0")
+    site.login.assert_not_called()
+    site.dismiss_interstitial.assert_not_called()
     mock_context.storage_state.assert_awaited_once_with(path=str(storage_state_path))
 
 

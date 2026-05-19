@@ -69,6 +69,19 @@ sites:
         load_config(config_path)
 
 
+def test_invalid_typed_value_raises_validation_error(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+sites: not-a-list
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError):
+        load_config(config_path)
+
+
 def test_unknown_type_raises(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -87,6 +100,20 @@ sites:
     )
 
     with pytest.raises(ValidationError):
+        load_config(config_path)
+
+
+def test_invalid_yaml_raises_value_error(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+sites:
+  - name: [not closed
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Failed to parse YAML config file"):
         load_config(config_path)
 
 

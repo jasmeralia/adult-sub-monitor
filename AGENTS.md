@@ -60,3 +60,5 @@ Bump the `VERSION` file, merge to `master`, and let CI handle tagging and Docker
 ## 10. Branch/PR conventions
 
 Create feature branches off `master`. Use squash merge. There are 0 required reviewers, but CI must pass and conversation resolution is required before merge.
+
+After **creating or merging a PR**, monitor the GitHub Actions run to confirm lint and test pass. Do not report success until CI is green. Use `gh pr checks <number>` to poll status, or `gh run view <run-id> --log-failed` to diagnose failures.

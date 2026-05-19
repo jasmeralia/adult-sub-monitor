@@ -6,6 +6,14 @@ from adult_sub_monitor.models import Item, SiteConfig
 from adult_sub_monitor.sites.venus_platform import VenusPlatformSite
 
 
+class AsyncContextManager:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+
 def make_site() -> VenusPlatformSite:
     return VenusPlatformSite(
         SiteConfig(
@@ -136,3 +144,107 @@ async def test_is_logged_in_false() -> None:
     page.locator = MagicMock(return_value=indicator)
 
     assert await site.is_logged_in(page) is False
+
+
+@pytest.mark.asyncio
+async def test_login_success(mocker) -> None:
+    site = make_site()
+    page = AsyncMock()
+    page.expect_navigation = MagicMock(return_value=AsyncContextManager())
+    mocker.patch.object(site, "is_logged_in", AsyncMock(return_value=True))
+
+    await site.login(page, "user@example.test", "secret")
+
+    assert page.fill.await_count == 2
+    page.click.assert_awaited_once()
+    page.expect_navigation.assert_called_once_with(wait_until="domcontentloaded")
+
+
+@pytest.mark.asyncio
+async def test_login_failure_raises(mocker) -> None:
+    site = make_site()
+    page = AsyncMock()
+    page.expect_navigation = MagicMock(return_value=AsyncContextManager())
+    mocker.patch.object(site, "is_logged_in", AsyncMock(return_value=False))
+
+    with pytest.raises(RuntimeError, match="Login failed for venus-test"):
+        await site.login(page, "user@example.test", "secret")
+
+
+@pytest.mark.asyncio
+async def test_get_latest_items_skips_missing_title_or_url(mocker) -> None:
+    site = make_site()
+    page = _page_with_cards(2)
+    mocker.patch.object(site, "_is_video_card", AsyncMock(return_value=True))
+    mocker.patch.object(site, "_first_text", AsyncMock(side_effect=[None, "Has Title"]))
+    mocker.patch.object(site, "_first_attribute", AsyncMock(return_value=None))
+
+    assert await site.get_latest_items(page) == []
+
+
+@pytest.mark.asyncio
+async def test_is_video_card_uses_card_match_signal() -> None:
+    site = make_site()
+    card = MagicMock()
+    card.evaluate = AsyncMock(return_value=True)
+
+    assert await site._is_video_card(card) is True
+    card.evaluate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_first_text_returns_stripped_text_or_none() -> None:
+    site = make_site()
+    locator = MagicMock()
+    locator.count = AsyncMock(return_value=1)
+    locator.first.inner_text = AsyncMock(return_value="  Video Title  ")
+    card = MagicMock()
+    card.locator = MagicMock(return_value=locator)
+
+    assert await site._first_text(card, ".title") == "Video Title"
+
+    empty_locator = MagicMock()
+    empty_locator.count = AsyncMock(return_value=0)
+    card.locator = MagicMock(return_value=empty_locator)
+
+    assert await site._first_text(card, ".missing") is None
+
+
+@pytest.mark.asyncio
+async def test_first_attribute_returns_stripped_attribute_or_none() -> None:
+    site = make_site()
+    locator = MagicMock()
+    locator.count = AsyncMock(return_value=1)
+    locator.first.get_attribute = AsyncMock(return_value="  /videos/1  ")
+    card = MagicMock()
+    card.locator = MagicMock(return_value=locator)
+
+    assert await site._first_attribute(card, "a", "href") == "/videos/1"
+
+    locator.first.get_attribute = AsyncMock(return_value=None)
+
+    assert await site._first_attribute(card, "a", "href") is None
+
+    empty_locator = MagicMock()
+    empty_locator.count = AsyncMock(return_value=0)
+    card.locator = MagicMock(return_value=empty_locator)
+
+    assert await site._first_attribute(card, "a", "href") is None
+
+
+@pytest.mark.asyncio
+async def test_all_text_returns_non_empty_stripped_values() -> None:
+    site = make_site()
+    first = MagicMock()
+    first.inner_text = AsyncMock(return_value="  Performer A  ")
+    second = MagicMock()
+    second.inner_text = AsyncMock(return_value="  ")
+    third = MagicMock()
+    third.inner_text = AsyncMock(return_value="Performer B")
+    locator = MagicMock()
+    locator.count = AsyncMock(return_value=3)
+    locator.nth = MagicMock(side_effect=[first, second, third])
+    card = MagicMock()
+    card.locator = MagicMock(return_value=locator)
+
+    assert await site._all_text(card, ".performer") == ["Performer A", "Performer B"]
