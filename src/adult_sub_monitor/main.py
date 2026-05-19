@@ -121,7 +121,7 @@ async def run() -> None:
     )
     await browser_manager.start()
 
-    webhook_url = os.environ[config.discord_webhook_env]
+    webhook_url = os.environ.get(config.discord_webhook_env, config.discord_webhook_env)
     run_once = os.environ.get("RUN_ONCE") == "1"
     dry_run = os.environ.get("DRY_RUN") == "1"
     sites = [_build_site(site_config) for site_config in config.sites]
