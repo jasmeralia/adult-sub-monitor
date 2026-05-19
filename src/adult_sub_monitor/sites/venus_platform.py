@@ -1,6 +1,6 @@
 from urllib.parse import urljoin
 
-from playwright.async_api import Page
+from playwright.async_api import Locator, Page
 
 from adult_sub_monitor.models import Item, SiteConfig
 from adult_sub_monitor.sites.base import BaseSite
@@ -8,8 +8,11 @@ from adult_sub_monitor.sites.base import BaseSite
 LOGIN_EMAIL_SELECTOR = "#inputEmail"
 LOGIN_PASSWORD_SELECTOR = "#inputPassword"
 LOGIN_SUBMIT_SELECTOR = ".submit-button"
-VIDEO_CARD_SELECTOR = "a:has(.the-tile.video-content-tile)"
+VIDEO_CARD_SELECTOR = ".content-grid-item-wrapper:has(.the-tile.video-content-tile)"
+VIDEO_LINK_SELECTOR = "a:has(.the-tile.video-content-tile)"
 THUMBNAIL_SELECTOR = "img.thumb"
+TITLE_SELECTOR = ".metadata .title"
+PERFORMERS_SELECTOR = ".model-tag-label"
 
 
 class VenusPlatformSite(BaseSite):
@@ -37,41 +40,58 @@ class VenusPlatformSite(BaseSite):
         await page.wait_for_timeout(2000)
 
         items: list[Item] = []
+        seen_hrefs: set[str] = set()
         cards = page.locator(VIDEO_CARD_SELECTOR)
-        count = await cards.count()
 
-        for index in range(count):
+        for index in range(await cards.count()):
             card = cards.nth(index)
-            href = await card.get_attribute("href")
-            if not href:
+
+            link_locator = card.locator(VIDEO_LINK_SELECTOR)
+            if await link_locator.count() == 0:
                 continue
+            href = await link_locator.first.get_attribute("href")
+            if not href or href in seen_hrefs:
+                continue
+            seen_hrefs.add(href)
+
+            title_locator = card.locator(TITLE_SELECTOR)
+            title: str | None = None
+            if await title_locator.count() > 0:
+                title = (await title_locator.first.inner_text()).strip() or None
 
             thumb_locator = card.locator(THUMBNAIL_SELECTOR)
-            if await thumb_locator.count() == 0:
-                continue
-
-            thumb = thumb_locator.first
-            title = await thumb.get_attribute("alt")
-            thumbnail_src = await thumb.get_attribute("src")
+            thumbnail_src: str | None = None
+            if await thumb_locator.count() > 0:
+                if not title:
+                    title = await thumb_locator.first.get_attribute("alt")
+                thumbnail_src = await thumb_locator.first.get_attribute("src")
 
             if not title:
                 continue
 
-            absolute_url = urljoin(self.base_url, href)
-            absolute_thumbnail = (
-                urljoin(self.base_url, thumbnail_src) if thumbnail_src else None
-            )
-
+            performers = await self._all_text(card, PERFORMERS_SELECTOR)
+            item_url = urljoin(self.base_url, href)
             items.append(
                 Item(
                     site_name=self.name,
-                    item_id=absolute_url,
+                    item_id=item_url,
                     title=title,
-                    url=absolute_url,
-                    thumbnail_url=absolute_thumbnail,
-                    performers=[],
+                    url=item_url,
+                    thumbnail_url=(
+                        urljoin(self.base_url, thumbnail_src) if thumbnail_src else None
+                    ),
+                    performers=performers,
                     tags=[],
                 )
             )
 
         return items
+
+    async def _all_text(self, card: Locator, selector: str) -> list[str]:
+        locator = card.locator(selector)
+        values: list[str] = []
+        for i in range(await locator.count()):
+            text = (await locator.nth(i).inner_text()).strip()
+            if text:
+                values.append(text)
+        return values
