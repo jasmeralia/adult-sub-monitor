@@ -64,8 +64,10 @@ class BrowserManager:
 
         await page.goto(site.probe_url)
         if not await site.is_logged_in(page):
-            username = os.environ[site_config.credentials_env_user]
-            password = os.environ[site_config.credentials_env_pass]
+            env_user = site_config.credentials_env_user
+            env_pass = site_config.credentials_env_pass
+            username = os.environ.get(env_user, env_user)
+            password = os.environ.get(env_pass, env_pass)
             await site.login(page, username, password)
             await site.dismiss_interstitial(page)
 
