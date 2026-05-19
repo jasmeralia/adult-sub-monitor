@@ -4,9 +4,8 @@ WORKDIR /app
 
 # System deps already in playwright image; just install Python deps
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
-
 COPY src/ ./src/
+RUN pip install --no-cache-dir .
 
 # Non-root user
 RUN useradd -m -u 1000 monitor && \
