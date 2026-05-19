@@ -16,6 +16,7 @@ class Item(BaseModel):
 
 class SiteConfig(BaseModel):
     name: str
+    display_name: str | None = None
     type: Literal["venus_platform", "wowgirls_platform", "vixen_media_group_platform"]
     base_url: HttpUrl
     login_url: HttpUrl

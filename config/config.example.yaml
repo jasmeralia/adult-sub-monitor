@@ -1,5 +1,6 @@
 sites:
   - name: tushy
+    display_name: tushy.com
     type: vixen_media_group_platform
     enabled: false
     base_url: https://members.tushy.com
@@ -11,6 +12,7 @@ sites:
     credentials_env_pass: TUSHY_PASS
 
   - name: deeper
+    display_name: deeper.com
     type: vixen_media_group_platform
     enabled: false
     base_url: https://members.deeper.com
@@ -22,6 +24,7 @@ sites:
     credentials_env_pass: DEEPER_PASS
 
   - name: sensual_love
+    display_name: sensual.love
     type: venus_platform
     base_url: https://venus.sensual.love
     login_url: https://venus.sensual.love/login
@@ -32,6 +35,7 @@ sites:
     credentials_env_pass: SENSUAL_PASS
 
   - name: wowgirls
+    display_name: wowgirls.com
     type: wowgirls_platform
     base_url: https://venus.wowgirls.com
     login_url: https://venus.wowgirls.com/login
@@ -42,6 +46,7 @@ sites:
     credentials_env_pass: WOWGIRLS_PASS
 
   - name: ultrafilms
+    display_name: ultrafilms.com
     type: venus_platform
     base_url: https://venus.ultrafilms.com
     login_url: https://venus.ultrafilms.com/login
@@ -52,6 +57,7 @@ sites:
     credentials_env_pass: ULTRAFILMS_PASS
 
   - name: angels_love
+    display_name: angels.love
     type: venus_platform
     base_url: https://venus.angels.love
     login_url: https://venus.angels.love/login

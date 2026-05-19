@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -84,6 +84,10 @@ def _make_page(*cards: MagicMock) -> AsyncMock:
     return page
 
 
+def _no_tags() -> AsyncMock:
+    return AsyncMock(return_value=[])
+
+
 @pytest.mark.asyncio
 async def test_login_navigates_fills_and_waits() -> None:
     site = make_site()
@@ -125,7 +129,8 @@ async def test_get_latest_items_returns_video_cards() -> None:
     card2 = _make_card("/members/content/item/def-second", "Second Video")
     page = _make_page(card1, card2)
 
-    items = await site.get_latest_items(page)
+    with patch.object(site, "_fetch_tags", _no_tags()):
+        items = await site.get_latest_items(page)
 
     assert len(items) == 2
     assert all(isinstance(item, Item) for item in items)
@@ -143,7 +148,8 @@ async def test_get_latest_items_deduplicates_repeated_tiles() -> None:
     card3 = _make_card(href, "My Video")
     page = _make_page(card1, card2, card3)
 
-    items = await site.get_latest_items(page)
+    with patch.object(site, "_fetch_tags", _no_tags()):
+        items = await site.get_latest_items(page)
 
     assert len(items) == 1
     assert items[0].title == "My Video"
@@ -155,9 +161,24 @@ async def test_get_latest_items_includes_performers() -> None:
     card = _make_card(performers=["Chanel X", "Vixi Rafi"])
     page = _make_page(card)
 
-    items = await site.get_latest_items(page)
+    with patch.object(site, "_fetch_tags", _no_tags()):
+        items = await site.get_latest_items(page)
 
     assert items[0].performers == ["Chanel X", "Vixi Rafi"]
+
+
+@pytest.mark.asyncio
+async def test_get_latest_items_includes_tags() -> None:
+    site = make_site()
+    card = _make_card()
+    page = _make_page(card)
+
+    with patch.object(
+        site, "_fetch_tags", AsyncMock(return_value=["Solo", "Lingerie"])
+    ):
+        items = await site.get_latest_items(page)
+
+    assert items[0].tags == ["Solo", "Lingerie"]
 
 
 @pytest.mark.asyncio
@@ -168,7 +189,8 @@ async def test_get_latest_items_absolute_url() -> None:
     )
     page = _make_page(card)
 
-    items = await site.get_latest_items(page)
+    with patch.object(site, "_fetch_tags", _no_tags()):
+        items = await site.get_latest_items(page)
 
     assert len(items) == 1
     assert (
@@ -234,7 +256,8 @@ async def test_get_latest_items_falls_back_to_img_alt_for_title() -> None:
     card.locator = MagicMock(side_effect=locator_factory)
     page = _make_page(card)
 
-    items = await site.get_latest_items(page)
+    with patch.object(site, "_fetch_tags", _no_tags()):
+        items = await site.get_latest_items(page)
 
     assert len(items) == 1
     assert items[0].title == "Alt Title"
@@ -255,7 +278,8 @@ async def test_get_latest_items_no_thumbnail_url() -> None:
     card = _make_card(src=None)
     page = _make_page(card)
 
-    items = await site.get_latest_items(page)
+    with patch.object(site, "_fetch_tags", _no_tags()):
+        items = await site.get_latest_items(page)
 
     assert len(items) == 1
     assert items[0].thumbnail_url is None
@@ -267,6 +291,51 @@ async def test_get_latest_items_tags_empty() -> None:
     card = _make_card()
     page = _make_page(card)
 
-    items = await site.get_latest_items(page)
+    with patch.object(site, "_fetch_tags", _no_tags()):
+        items = await site.get_latest_items(page)
 
     assert items[0].tags == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_tags_navigates_and_extracts() -> None:
+    site = make_site()
+
+    def tag_item(name: str) -> MagicMock:
+        m = MagicMock()
+        m.inner_text = AsyncMock(return_value=name)
+        return m
+
+    tag_mocks = [tag_item("Solo"), tag_item("Lingerie")]
+    tag_locator = MagicMock()
+    tag_locator.count = AsyncMock(return_value=2)
+    tag_locator.nth = MagicMock(side_effect=lambda i: tag_mocks[i])
+
+    page = AsyncMock()
+    page.locator = MagicMock(return_value=tag_locator)
+
+    tags = await site._fetch_tags(
+        page, "https://venus.example/members/content/item/abc"
+    )
+
+    page.goto.assert_awaited_once_with(
+        "https://venus.example/members/content/item/abc", wait_until="domcontentloaded"
+    )
+    assert tags == ["Solo", "Lingerie"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_tags_returns_empty_when_none_present() -> None:
+    site = make_site()
+
+    tag_locator = MagicMock()
+    tag_locator.count = AsyncMock(return_value=0)
+
+    page = AsyncMock()
+    page.locator = MagicMock(return_value=tag_locator)
+
+    tags = await site._fetch_tags(
+        page, "https://venus.example/members/content/item/abc"
+    )
+
+    assert tags == []
