@@ -18,7 +18,7 @@ Dockerized Python service that monitors authenticated subscription video sites, 
    cp config/config.example.yaml config/config.yaml
    ```
 
-3. Edit `config/config.yaml` and `.env`.
+3. Edit `config/config.yaml` and provide the required environment variables.
 4. Start the service:
 
    ```sh
@@ -29,8 +29,8 @@ Dockerized Python service that monitors authenticated subscription video sites, 
 
 | Site | Family | Notes |
 |---|---|---|
-| `members.deeper.com` | Deeper/Tushy | Intermittent post-login interstitial |
-| `members.tushy.com` | Deeper/Tushy | Intermittent post-login interstitial |
+| `members.deeper.com` | Vixen Media Group platform | Intermittent post-login interstitial |
+| `members.tushy.com` | Vixen Media Group platform | Intermittent post-login interstitial |
 | `venus.angels.love` | Venus platform | Mixes videos and photo sets |
 | `venus.sensual.love` | Venus platform | Mixes videos and photo sets |
 | `venus.wowgirls.com` | Venus platform | Mixes videos and photo sets |
@@ -60,7 +60,3 @@ Dockerized Python service that monitors authenticated subscription video sites, 
 | `clean` | Remove local caches, coverage output, and the virtual environment. |
 | `docker-build` | Build the local development Docker image. |
 | `docker-run` | Start the service with Docker Compose. |
-
-## Phase 2
-
-Deferred features include video downloads, Plex/Jellyfin integration, and multi-channel Discord notifications.

@@ -4,7 +4,7 @@ import pytest
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from adult_sub_monitor.models import SiteConfig
-from adult_sub_monitor.sites.deeper_tushy import DeeperTushySite
+from adult_sub_monitor.sites.vixen_media_group_platform import VixenMediaGroupSite
 
 
 class AsyncContextManager:
@@ -15,11 +15,11 @@ class AsyncContextManager:
         return None
 
 
-def make_site() -> DeeperTushySite:
-    return DeeperTushySite(
+def make_site() -> VixenMediaGroupSite:
+    return VixenMediaGroupSite(
         SiteConfig(
             name="deeper-test",
-            type="deeper_tushy",
+            type="vixen_media_group_platform",
             base_url="https://deeper.example",
             login_url="https://deeper.example/login",
             probe_url="https://deeper.example/account",

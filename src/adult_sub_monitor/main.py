@@ -17,8 +17,8 @@ from adult_sub_monitor.db import Database
 from adult_sub_monitor.discord import send_video_notification
 from adult_sub_monitor.models import Item, SiteConfig
 from adult_sub_monitor.sites.base import BaseSite
-from adult_sub_monitor.sites.deeper_tushy import DeeperTushySite
 from adult_sub_monitor.sites.venus_platform import VenusPlatformSite
+from adult_sub_monitor.sites.vixen_media_group_platform import VixenMediaGroupSite
 
 logger = logging.getLogger(__name__)
 _site_locks: dict[str, asyncio.Lock] = {}
@@ -27,8 +27,8 @@ _site_locks: dict[str, asyncio.Lock] = {}
 def _build_site(site_config: SiteConfig) -> BaseSite:
     if site_config.type == "venus_platform":
         return VenusPlatformSite(site_config)
-    if site_config.type == "deeper_tushy":
-        return DeeperTushySite(site_config)
+    if site_config.type == "vixen_media_group_platform":
+        return VixenMediaGroupSite(site_config)
 
     raise ValueError(f"Unsupported site type: {site_config.type}")
 

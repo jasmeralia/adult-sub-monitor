@@ -1,6 +1,6 @@
 sites:
   - name: tushy
-    type: deeper_tushy
+    type: vixen_media_group_platform
     base_url: https://members.tushy.com
     login_url: https://members.tushy.com/login
     probe_url: https://members.tushy.com/videos
@@ -10,7 +10,7 @@ sites:
     credentials_env_pass: TUSHY_PASS
 
   - name: deeper
-    type: deeper_tushy
+    type: vixen_media_group_platform
     base_url: https://members.deeper.com
     login_url: https://members.deeper.com/login
     probe_url: https://members.deeper.com/videos
