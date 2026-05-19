@@ -34,7 +34,7 @@ Use spaces only, no tabs. Do not leave trailing whitespace. Linting runs through
 
 `sites/venus_platform.py` implements the shared Venus platform scraper for the four `venus.*` sites, using `/videos` listings plus per-card video checks to exclude photo sets.
 
-`sites/deeper_tushy.py` implements the shared Deeper/Tushy scraper, including the intermittent post-login interstitial dismissal flow.
+`sites/vixen_media_group_platform.py` implements the shared Vixen Media Group platform scraper, including the intermittent post-login interstitial dismissal flow.
 
 `main.py` orchestrates config loading, logging, scheduling, per-site checks, deduplication, notifications, retry handling, and graceful shutdown.
 

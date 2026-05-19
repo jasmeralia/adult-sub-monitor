@@ -32,7 +32,7 @@ PERFORMERS_SELECTOR = ".performer, .models a, a[href*='/models/']"
 TAGS_SELECTOR = ".tag, .categories a, a[href*='/categories/'], a[href*='/tags/']"
 
 
-class DeeperTushySite(BaseSite):
+class VixenMediaGroupSite(BaseSite):
     def __init__(self, site_config: SiteConfig):
         self.name = str(site_config.name)
         self.base_url = str(site_config.base_url)

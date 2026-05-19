@@ -12,13 +12,13 @@ storefronts). This project handles **authenticated** sites with form-based login
 and short-lived sessions.
 
 **Repo name:** `adult-sub-monitor` (dashes — see naming convention notes).
-**Status:** Phase 1 scope (this document).
+**Status:** Current implementation scope (this document).
 
 ---
 
 ## Goals & Non-Goals
 
-### Goals (Phase 1)
+### Goals
 
 - Authenticate to six subscription sites via form login (Playwright).
 - Persist session cookies between runs; re-authenticate only when sessions expire.
@@ -30,10 +30,10 @@ and short-lived sessions.
 - CI: lint on all branches, auto-tag and publish Docker image to GHCR on merge
   to master.
 
-### Non-Goals (Phase 1)
+### Non-Goals
 
-- Automatic video downloading (deferred to Phase 2).
-- Plex/Jellyfin library integration (deferred to Phase 2).
+- Automatic video downloading.
+- Plex/Jellyfin library integration.
 - Photo set notifications (explicitly excluded).
 - Sites beyond the six listed below (extensible, but not in scope).
 - Multi-recipient or multi-channel notifications (Discord webhook only).
@@ -45,8 +45,8 @@ and short-lived sessions.
 
 | Site                       | Family          | Notes                                       |
 |----------------------------|-----------------|---------------------------------------------|
-| `members.deeper.com`       | Deeper/Tushy    | Intermittent post-login interstitial        |
-| `members.tushy.com`        | Deeper/Tushy    | Intermittent post-login interstitial        |
+| `members.deeper.com`       | Vixen Media Group platform | Intermittent post-login interstitial        |
+| `members.tushy.com`        | Vixen Media Group platform | Intermittent post-login interstitial        |
 | `venus.angels.love`        | Venus platform  | Mixes videos and photo sets                 |
 | `venus.sensual.love`       | Venus platform  | Mixes videos and photo sets                 |
 | `venus.wowgirls.com`       | Venus platform  | Mixes videos and photo sets                 |
@@ -54,7 +54,8 @@ and short-lived sessions.
 
 The four `venus.*` sites share a common platform; one scraper class
 (`VenusPlatformSite`) covers all four with per-site config. Deeper and Tushy
-share a platform; one class (`DeeperTushySite`) covers both.
+share the Vixen Media Group platform; one class (`VixenMediaGroupSite`) covers
+both.
 
 ---
 
@@ -87,7 +88,7 @@ adult-sub-monitor/
 │           ├── __init__.py
 │           ├── base.py           # BaseSite ABC
 │           ├── venus_platform.py
-│           └── deeper_tushy.py
+│           └── vixen_media_group_platform.py
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py
@@ -100,7 +101,7 @@ adult-sub-monitor/
 │       ├── __init__.py
 │       ├── test_base.py
 │       ├── test_venus_platform.py
-│       └── test_deeper_tushy.py
+│       └── test_vixen_media_group_platform.py
 ├── .dockerignore
 ├── .gitignore
 ├── .python-version              # 3.13
@@ -184,7 +185,7 @@ mechanism for video-only filtering. As a defence-in-depth measure, the scraper
 also checks each card's content-type indicator (DOM attribute or class name)
 before yielding it.
 
-**`sites/deeper_tushy.py` — DeeperTushySite**
+**`sites/vixen_media_group_platform.py` — VixenMediaGroupSite**
 
 Single class parameterised by `base_url`. Implements `dismiss_interstitial`:
 runs once post-login, looks for the continue button with a 5-second timeout,
@@ -244,7 +245,7 @@ class Item(BaseModel):
 
 class SiteConfig(BaseModel):
     name: str
-    type: Literal["venus_platform", "deeper_tushy"]
+    type: Literal["venus_platform", "vixen_media_group_platform"]
     base_url: HttpUrl
     login_url: HttpUrl
     probe_url: HttpUrl
@@ -272,7 +273,7 @@ class AppConfig(BaseModel):
 ```yaml
 sites:
   - name: tushy
-    type: deeper_tushy
+    type: vixen_media_group_platform
     base_url: https://members.tushy.com
     login_url: https://members.tushy.com/login
     probe_url: https://members.tushy.com/videos
@@ -282,7 +283,7 @@ sites:
     credentials_env_pass: TUSHY_PASS
 
   - name: deeper
-    type: deeper_tushy
+    type: vixen_media_group_platform
     base_url: https://members.deeper.com
     login_url: https://members.deeper.com/login
     probe_url: https://members.deeper.com/videos
@@ -563,8 +564,6 @@ services:
     volumes:
       - ./config:/config:ro
       - ./data:/data
-    env_file:
-      - .env
     environment:
       - LOG_LEVEL=INFO
 ```
@@ -584,7 +583,7 @@ services:
 | `main.py`                       | `tests/test_main.py`                   | Mocked scheduler, mocked sites         |
 | `sites/base.py`                 | `tests/sites/test_base.py`             | Concrete test subclass                 |
 | `sites/venus_platform.py`       | `tests/sites/test_venus_platform.py`   | HTML fixtures + AsyncMock pages        |
-| `sites/deeper_tushy.py`         | `tests/sites/test_deeper_tushy.py`     | HTML fixtures + interstitial scenarios |
+| `sites/vixen_media_group_platform.py` | `tests/sites/test_vixen_media_group_platform.py` | HTML fixtures + interstitial scenarios |
 
 ### Key test cases
 
@@ -606,7 +605,7 @@ services:
 - Cookie restore path: never calls `dismiss_interstitial`
 - Storage state persisted after successful auth
 
-**`test_deeper_tushy.py`**
+**`test_vixen_media_group_platform.py`**
 - Interstitial present: clicked, returns True
 - Interstitial absent: returns False after timeout (no error)
 - Interstitial click fails: returns False, logs warning, no exception
@@ -866,18 +865,12 @@ Sections:
 
 ---
 
-## Open Questions / Phase 2 Hooks
+## Implementation Notes
 
-Resolved during prior discussion — confirmed for Phase 1:
+Resolved during prior discussion:
 - ✅ Interstitial is post-login only (not mid-session) → simple one-shot dismiss
 - ✅ Photo set exclusion via `/videos` URL + per-item type check
 - ✅ Notification target is Discord only
-
-Deferred to Phase 2:
-- Automatic video downloads + Plex/Jellyfin integration
-- Authenticated re-auth alerts (long-term cookie failures surfacing to user)
-- Per-site backoff on repeated auth failures (currently just retries on schedule)
-- Multi-channel notifications (Matrix, email)
 
 Still unknown (resolved during implementation by inspecting live sites):
 - Exact DOM selectors for each platform's login form, interstitial button,

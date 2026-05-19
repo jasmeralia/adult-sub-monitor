@@ -57,7 +57,7 @@ def test_build_site_known_types() -> None:
     venus_config = build_site_config()
     deeper_config = SiteConfig(
         name="deeper-test",
-        type="deeper_tushy",
+        type="vixen_media_group_platform",
         base_url="https://deeper.example",
         login_url="https://deeper.example/login",
         probe_url="https://deeper.example/account",

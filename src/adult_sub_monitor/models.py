@@ -16,7 +16,7 @@ class Item(BaseModel):
 
 class SiteConfig(BaseModel):
     name: str
-    type: Literal["venus_platform", "deeper_tushy"]
+    type: Literal["venus_platform", "vixen_media_group_platform"]
     base_url: HttpUrl
     login_url: HttpUrl
     probe_url: HttpUrl
