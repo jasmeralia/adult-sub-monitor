@@ -7,11 +7,11 @@ name = "adult-sub-monitor"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "playwright>=1.49",
-    "pydantic>=2.0",
-    "apscheduler>=3.10",
-    "aiohttp>=3.9",
-    "pyyaml>=6.0",
+    "playwright>=1.60.0",
+    "pydantic>=2.13.4",
+    "apscheduler>=3.11.2",
+    "aiohttp>=3.13.5",
+    "pyyaml>=6.0.3",
 ]
 
 [project.optional-dependencies]
