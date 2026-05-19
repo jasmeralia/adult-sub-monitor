@@ -12,4 +12,5 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -e ".[dev]"
-      - run: make test-cov
+      - run: playwright install chromium
+      - run: pytest --cov=adult_sub_monitor --cov-report=term-missing --cov-fail-under=80
