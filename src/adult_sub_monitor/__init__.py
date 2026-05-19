@@ -1,0 +1,1 @@
+"""Adult subscription site monitor."""
