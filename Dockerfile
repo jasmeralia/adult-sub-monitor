@@ -6,6 +6,7 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY src/ ./src/
 RUN pip install --no-cache-dir .
+RUN camoufox fetch
 
 # Non-root user
 RUN useradd -m monitor && \

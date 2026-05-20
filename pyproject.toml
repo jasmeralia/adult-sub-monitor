@@ -7,6 +7,7 @@ name = "adult-sub-monitor"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "camoufox>=0.4.11",
     "playwright>=1.60.0",
     "pydantic>=2.13.4",
     "apscheduler>=3.11.2",

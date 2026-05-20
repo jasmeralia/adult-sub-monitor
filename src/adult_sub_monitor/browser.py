@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
+from contextlib import AsyncExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from playwright.async_api import Browser, BrowserContext, Playwright, async_playwright
+from camoufox.async_api import AsyncCamoufox
+from playwright.async_api import Browser, BrowserContext
 
 if TYPE_CHECKING:
     from adult_sub_monitor.models import SiteConfig
@@ -18,26 +21,27 @@ class BrowserManager:
         self.sessions_dir = sessions_dir
         self.headless = headless
         self.user_agent = user_agent
-        self._playwright: Playwright | None = None
+        self._camoufox: AsyncCamoufox | None = None
+        self._exit_stack = AsyncExitStack()
         self._browser: Browser | None = None
 
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
 
     async def start(self) -> None:
-        self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(
-            headless=self.headless,
-            args=["--disable-blink-features=AutomationControlled"],
+        self._camoufox = cast(Callable[..., AsyncCamoufox], AsyncCamoufox)(
+            headless=self.headless
+        )
+        self._browser = cast(
+            Browser,
+            await self._exit_stack.enter_async_context(self._camoufox),
         )
 
     async def stop(self) -> None:
-        if self._browser is not None:
-            await self._browser.close()
+        if self._camoufox is not None:
+            await self._exit_stack.aclose()
+            self._exit_stack = AsyncExitStack()
+            self._camoufox = None
             self._browser = None
-
-        if self._playwright is not None:
-            await self._playwright.stop()
-            self._playwright = None
 
     async def ensure_authenticated(
         self,
@@ -65,7 +69,7 @@ class BrowserManager:
             context = await self._browser.new_context()
         page = await context.new_page()
 
-        await page.goto(site.probe_url)
+        await page.goto(site.probe_url, wait_until="domcontentloaded")
         if not await site.is_logged_in(page):
             env_user = site_config.credentials_env_user
             env_pass = site_config.credentials_env_pass
@@ -74,7 +78,7 @@ class BrowserManager:
             await site.login(page, username, password)
             await site.dismiss_interstitial(page)
 
-            await page.goto(site.probe_url)
+            await page.goto(site.probe_url, wait_until="domcontentloaded")
             if not await site.is_logged_in(page):
                 raise RuntimeError(f"Authentication failed for {site.name}")
 

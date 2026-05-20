@@ -118,10 +118,8 @@ async def test_get_latest_items_video_only_filtering(mocker) -> None:
 @pytest.mark.asyncio
 async def test_is_logged_in_true() -> None:
     site = make_site()
-    indicator = MagicMock()
-    indicator.count = AsyncMock(return_value=1)
     page = AsyncMock()
-    page.locator = MagicMock(return_value=indicator)
+    page.url = "https://members.deeper.com/videos"
 
     assert await site.is_logged_in(page) is True
 
@@ -129,10 +127,8 @@ async def test_is_logged_in_true() -> None:
 @pytest.mark.asyncio
 async def test_is_logged_in_false() -> None:
     site = make_site()
-    indicator = MagicMock()
-    indicator.count = AsyncMock(return_value=0)
     page = AsyncMock()
-    page.locator = MagicMock(return_value=indicator)
+    page.url = "https://login.vixen.com/i/deeper/login?"
 
     assert await site.is_logged_in(page) is False
 
@@ -141,13 +137,15 @@ async def test_is_logged_in_false() -> None:
 async def test_login_success(mocker) -> None:
     site = make_site()
     page = AsyncMock()
+    locator = AsyncMock()
+    page.locator = MagicMock(return_value=locator)
     page.expect_navigation = MagicMock(return_value=AsyncContextManager())
     mocker.patch.object(site, "is_logged_in", AsyncMock(return_value=True))
 
     await site.login(page, "user@example.test", "secret")
 
-    assert page.fill.await_count == 2
-    page.click.assert_awaited_once()
+    assert locator.press_sequentially.await_count == 2
+    locator.click.assert_awaited_once()
     page.expect_navigation.assert_called_once_with(wait_until="domcontentloaded")
 
 
@@ -155,7 +153,9 @@ async def test_login_success(mocker) -> None:
 async def test_login_navigation_failure_is_wrapped() -> None:
     site = make_site()
     page = AsyncMock()
-    page.fill = AsyncMock(side_effect=RuntimeError("field missing"))
+    locator = AsyncMock()
+    locator.press_sequentially = AsyncMock(side_effect=RuntimeError("field missing"))
+    page.locator = MagicMock(return_value=locator)
 
     with pytest.raises(RuntimeError, match="Login failed for deeper-test"):
         await site.login(page, "user@example.test", "secret")
@@ -165,6 +165,8 @@ async def test_login_navigation_failure_is_wrapped() -> None:
 async def test_login_not_logged_in_raises(mocker) -> None:
     site = make_site()
     page = AsyncMock()
+    locator = AsyncMock()
+    page.locator = MagicMock(return_value=locator)
     page.expect_navigation = MagicMock(return_value=AsyncContextManager())
     mocker.patch.object(site, "is_logged_in", AsyncMock(return_value=False))
 

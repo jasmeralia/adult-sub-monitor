@@ -33,18 +33,12 @@ async def _started_manager(
     mock_browser = AsyncMock()
     mock_browser.new_context = AsyncMock(return_value=mock_context)
 
-    mock_playwright = MagicMock()
-    mock_playwright.chromium.launch = AsyncMock(return_value=mock_browser)
-    mock_playwright.stop = AsyncMock()
+    mock_camoufox_instance = AsyncMock()
+    mock_camoufox_instance.__aenter__ = AsyncMock(return_value=mock_browser)
+    mock_camoufox_instance.__aexit__ = AsyncMock(return_value=None)
 
-    mock_playwright_manager = MagicMock()
-    mock_playwright_manager.start = AsyncMock(return_value=mock_playwright)
-    mock_playwright_manager.__aenter__ = AsyncMock(return_value=mock_playwright)
-    mock_playwright_manager.__aexit__ = AsyncMock(return_value=None)
-    mocker.patch(
-        "adult_sub_monitor.browser.async_playwright",
-        return_value=mock_playwright_manager,
-    )
+    mock_camoufox_cls = MagicMock(return_value=mock_camoufox_instance)
+    mocker.patch("adult_sub_monitor.browser.AsyncCamoufox", mock_camoufox_cls)
 
     manager = BrowserManager(tmp_path, headless=True, user_agent=user_agent)
     await manager.start()
@@ -56,15 +50,14 @@ async def test_start_and_stop_launches_and_closes_browser(
     mocker, tmp_path, mock_page
 ) -> None:
     mock_context = AsyncMock()
-    manager, mock_browser = await _started_manager(
+    manager, _mock_browser = await _started_manager(
         mocker, tmp_path, mock_context, mock_page
     )
 
     await manager.stop()
 
-    mock_browser.close.assert_awaited_once_with()
     assert manager._browser is None
-    assert manager._playwright is None
+    assert manager._camoufox is None
 
 
 @pytest.mark.asyncio
@@ -83,6 +76,9 @@ async def test_ensure_authenticated_cookie_restore(mocker, tmp_path, mock_page) 
     assert context is mock_context
     mock_browser.new_context.assert_awaited_once_with(
         storage_state=str(storage_state_path)
+    )
+    mock_page.goto.assert_awaited_once_with(
+        site.probe_url, wait_until="domcontentloaded"
     )
     site.login.assert_not_called()
     site.dismiss_interstitial.assert_not_called()
@@ -139,6 +135,7 @@ async def test_ensure_authenticated_fresh_login(
     context = await manager.ensure_authenticated(site, site_config)
 
     assert context is mock_context
+    mock_page.goto.assert_any_await(site.probe_url, wait_until="domcontentloaded")
     site.login.assert_awaited_once_with(mock_page, "user", "pass")
     site.dismiss_interstitial.assert_awaited_once_with(mock_page)
     mock_context.storage_state.assert_awaited_once_with(path=str(storage_state_path))
