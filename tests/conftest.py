@@ -1,10 +1,23 @@
+import importlib.util
+import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from types import ModuleType
 from unittest.mock import AsyncMock
 
 import pytest
 
 from adult_sub_monitor.db import Database
+
+if importlib.util.find_spec("playwright_stealth") is None:
+    playwright_stealth = ModuleType("playwright_stealth")
+
+    class Stealth:
+        async def apply_stealth_async(self, _ctx: object) -> None:
+            return None
+
+    playwright_stealth.Stealth = Stealth
+    sys.modules["playwright_stealth"] = playwright_stealth
 
 
 @pytest.fixture

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from playwright.async_api import Browser, BrowserContext, Playwright, async_playwright
+from playwright_stealth import Stealth
 
 if TYPE_CHECKING:
     from adult_sub_monitor.models import SiteConfig
@@ -63,9 +64,10 @@ class BrowserManager:
             context = await self._browser.new_context(user_agent=self.user_agent)
         else:
             context = await self._browser.new_context()
+        await Stealth().apply_stealth_async(context)
         page = await context.new_page()
 
-        await page.goto(site.probe_url)
+        await page.goto(site.probe_url, wait_until="domcontentloaded")
         if not await site.is_logged_in(page):
             env_user = site_config.credentials_env_user
             env_pass = site_config.credentials_env_pass
@@ -74,7 +76,7 @@ class BrowserManager:
             await site.login(page, username, password)
             await site.dismiss_interstitial(page)
 
-            await page.goto(site.probe_url)
+            await page.goto(site.probe_url, wait_until="domcontentloaded")
             if not await site.is_logged_in(page):
                 raise RuntimeError(f"Authentication failed for {site.name}")
 

@@ -26,7 +26,7 @@ def _site_config() -> SimpleNamespace:
 
 async def _started_manager(
     mocker, tmp_path, mock_context, mock_page, user_agent=None
-) -> tuple[BrowserManager, AsyncMock]:
+) -> tuple[BrowserManager, AsyncMock, AsyncMock]:
     mock_context.new_page = AsyncMock(return_value=mock_page)
     mock_context.storage_state = AsyncMock()
 
@@ -45,10 +45,16 @@ async def _started_manager(
         "adult_sub_monitor.browser.async_playwright",
         return_value=mock_playwright_manager,
     )
+    mock_stealth = MagicMock()
+    mock_stealth.apply_stealth_async = AsyncMock()
+    mocker.patch(
+        "adult_sub_monitor.browser.Stealth",
+        return_value=mock_stealth,
+    )
 
     manager = BrowserManager(tmp_path, headless=True, user_agent=user_agent)
     await manager.start()
-    return manager, mock_browser
+    return manager, mock_browser, mock_stealth
 
 
 @pytest.mark.asyncio
@@ -56,7 +62,7 @@ async def test_start_and_stop_launches_and_closes_browser(
     mocker, tmp_path, mock_page
 ) -> None:
     mock_context = AsyncMock()
-    manager, mock_browser = await _started_manager(
+    manager, mock_browser, _mock_stealth = await _started_manager(
         mocker, tmp_path, mock_context, mock_page
     )
 
@@ -74,7 +80,7 @@ async def test_ensure_authenticated_cookie_restore(mocker, tmp_path, mock_page) 
     storage_state_path = tmp_path / f"{site.name}.json"
     storage_state_path.write_text("{}", encoding="utf-8")
     mock_context = AsyncMock()
-    manager, mock_browser = await _started_manager(
+    manager, mock_browser, mock_stealth = await _started_manager(
         mocker, tmp_path, mock_context, mock_page
     )
 
@@ -83,6 +89,10 @@ async def test_ensure_authenticated_cookie_restore(mocker, tmp_path, mock_page) 
     assert context is mock_context
     mock_browser.new_context.assert_awaited_once_with(
         storage_state=str(storage_state_path)
+    )
+    mock_stealth.apply_stealth_async.assert_awaited_once_with(mock_context)
+    mock_page.goto.assert_awaited_once_with(
+        site.probe_url, wait_until="domcontentloaded"
     )
     site.login.assert_not_called()
     site.dismiss_interstitial.assert_not_called()
@@ -98,7 +108,7 @@ async def test_ensure_authenticated_cookie_restore_with_user_agent(
     storage_state_path = tmp_path / f"{site.name}.json"
     storage_state_path.write_text("{}", encoding="utf-8")
     mock_context = AsyncMock()
-    manager, mock_browser = await _started_manager(
+    manager, mock_browser, _mock_stealth = await _started_manager(
         mocker,
         tmp_path,
         mock_context,
@@ -132,13 +142,15 @@ async def test_ensure_authenticated_fresh_login(
     site_config = _site_config()
     storage_state_path = tmp_path / f"{site.name}.json"
     mock_context = AsyncMock()
-    manager, _mock_browser = await _started_manager(
+    manager, _mock_browser, mock_stealth = await _started_manager(
         mocker, tmp_path, mock_context, mock_page
     )
 
     context = await manager.ensure_authenticated(site, site_config)
 
     assert context is mock_context
+    mock_stealth.apply_stealth_async.assert_awaited_once_with(mock_context)
+    mock_page.goto.assert_any_await(site.probe_url, wait_until="domcontentloaded")
     site.login.assert_awaited_once_with(mock_page, "user", "pass")
     site.dismiss_interstitial.assert_awaited_once_with(mock_page)
     mock_context.storage_state.assert_awaited_once_with(path=str(storage_state_path))
@@ -152,7 +164,7 @@ async def test_ensure_authenticated_user_agent_without_storage_state(
     site_config = _site_config()
     storage_state_path = tmp_path / f"{site.name}.json"
     mock_context = AsyncMock()
-    manager, mock_browser = await _started_manager(
+    manager, mock_browser, _mock_stealth = await _started_manager(
         mocker,
         tmp_path,
         mock_context,
@@ -178,7 +190,7 @@ async def test_ensure_authenticated_reauth_failure(
     site = _site(AsyncMock(side_effect=[False, False]))
     site_config = _site_config()
     mock_context = AsyncMock()
-    manager, _mock_browser = await _started_manager(
+    manager, _mock_browser, _mock_stealth = await _started_manager(
         mocker, tmp_path, mock_context, mock_page
     )
 
@@ -194,7 +206,7 @@ async def test_ensure_authenticated_saves_storage_state(
     site_config = _site_config()
     storage_state_path = tmp_path / f"{site.name}.json"
     mock_context = AsyncMock()
-    manager, _mock_browser = await _started_manager(
+    manager, _mock_browser, _mock_stealth = await _started_manager(
         mocker, tmp_path, mock_context, mock_page
     )
 

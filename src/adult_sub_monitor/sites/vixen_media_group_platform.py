@@ -7,16 +7,6 @@ from adult_sub_monitor.models import Item, SiteConfig
 from adult_sub_monitor.sites.base import BaseSite
 
 # Confirmed against live site
-LOGIN_EMAIL_SELECTOR = (
-    "input[type='email'], input[name='email'], input[name='username']"
-)
-# Confirmed against live site
-LOGIN_PASSWORD_SELECTOR = "input[type='password'], input[name='password']"
-# Confirmed against live site
-LOGIN_SUBMIT_SELECTOR = "button[type='submit'], input[type='submit']"
-# Confirmed against live site
-LOGGED_IN_INDICATOR_SELECTOR = "a[href*='/logout'], a[href*='/account'], .member-menu"
-# Confirmed against live site
 VIDEO_CARD_SELECTOR = ".video-card, article:has(a[href*='/videos/']), [data-video-id]"
 # Confirmed against live site
 VIDEO_CARD_SIGNAL_SELECTOR = ".video-card, [data-video-id], a[href*='/videos/']"
@@ -44,11 +34,10 @@ class VixenMediaGroupSite(BaseSite):
 
     async def login(self, page: Page, username: str, password: str) -> None:
         try:
-            await page.fill(LOGIN_EMAIL_SELECTOR, username)
-            await page.fill(LOGIN_PASSWORD_SELECTOR, password)
-
+            await page.locator("#username").press_sequentially(username, delay=50)
+            await page.locator("#password").press_sequentially(password, delay=50)
             async with page.expect_navigation(wait_until="domcontentloaded"):
-                await page.click(LOGIN_SUBMIT_SELECTOR)
+                await page.locator("#submit-btn").click()
         except Exception as exc:
             raise RuntimeError(f"Login failed for {self.name}") from exc
 
@@ -56,8 +45,7 @@ class VixenMediaGroupSite(BaseSite):
             raise RuntimeError(f"Login failed for {self.name}")
 
     async def is_logged_in(self, page: Page) -> bool:
-        indicator = page.locator(LOGGED_IN_INDICATOR_SELECTOR)
-        return await indicator.count() > 0
+        return "login.vixen.com" not in page.url
 
     async def dismiss_interstitial(self, page: Page) -> bool:
         try:

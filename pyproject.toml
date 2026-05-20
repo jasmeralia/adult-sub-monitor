@@ -8,6 +8,7 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "playwright>=1.60.0",
+    "playwright-stealth>=1.0.0",
     "pydantic>=2.13.4",
     "apscheduler>=3.11.2",
     "aiohttp>=3.13.5",
@@ -44,7 +45,7 @@ strict = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["apscheduler.*"]
+module = ["apscheduler.*", "playwright_stealth"]
 ignore_missing_imports = true
 
 [tool.pylint.messages_control]
@@ -61,6 +62,7 @@ disable = [
 ]
 
 [tool.pylint.main]
+ignored-modules = ["playwright_stealth"]
 persistent = false
 
 [tool.pylint.format]
