@@ -1,28 +1,4 @@
 sites:
-  - name: tushy
-    display_name: tushy.com
-    type: vixen_media_group_platform
-    enabled: false
-    base_url: https://members.tushy.com
-    login_url: https://members.tushy.com/login
-    probe_url: https://members.tushy.com/videos
-    listing_url: https://members.tushy.com/videos
-    interval_hours: 6
-    credentials_env_user: TUSHY_USER
-    credentials_env_pass: TUSHY_PASS
-
-  - name: deeper
-    display_name: deeper.com
-    type: vixen_media_group_platform
-    enabled: false
-    base_url: https://members.deeper.com
-    login_url: https://members.deeper.com/login
-    probe_url: https://members.deeper.com/videos
-    listing_url: https://members.deeper.com/videos
-    interval_hours: 6
-    credentials_env_user: DEEPER_USER
-    credentials_env_pass: DEEPER_PASS
-
   - name: sensual_love
     display_name: sensual.love
     type: venus_platform

@@ -40,8 +40,6 @@ def test_load_example_config() -> None:
 
     assert isinstance(config, AppConfig)
     assert [site.name for site in config.sites] == [
-        "tushy",
-        "deeper",
         "sensual_love",
         "wowgirls",
         "ultrafilms",
