@@ -34,5 +34,6 @@ async def test_auth_defaults_are_no_ops() -> None:
 
     assert site.requires_auth is True
     assert site.context_options() == {}
+    assert site.init_scripts() == []
     assert await site.is_logged_in(AsyncMock()) is True
     assert await site.login(AsyncMock(), "user", "pass") is None

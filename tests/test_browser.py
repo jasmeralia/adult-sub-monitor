@@ -12,6 +12,7 @@ def _site(is_logged_in: AsyncMock) -> AsyncMock:
     site.probe_url = "https://example.test/account"
     site.requires_auth = True
     site.context_options = MagicMock(return_value={})
+    site.init_scripts = MagicMock(return_value=[])
     site.is_logged_in = is_logged_in
     site.login = AsyncMock()
     site.dismiss_interstitial = AsyncMock()
@@ -229,6 +230,27 @@ async def test_ensure_authenticated_anonymous_site_skips_auth_flow(
     site.dismiss_interstitial.assert_not_called()
     mock_context.storage_state.assert_not_called()
     assert not storage_state_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_ensure_authenticated_adds_site_init_scripts(
+    mocker, tmp_path, mock_page
+) -> None:
+    site = _site(AsyncMock(return_value=False))
+    site.requires_auth = False
+    site.init_scripts.return_value = ["window.__monitor = true;"]
+    site_config = _site_config()
+    mock_context = AsyncMock()
+    manager, _mock_browser = await _started_manager(
+        mocker,
+        tmp_path,
+        mock_context,
+        mock_page,
+    )
+
+    await manager.ensure_authenticated(site, site_config)
+
+    mock_context.add_init_script.assert_awaited_once_with("window.__monitor = true;")
 
 
 @pytest.mark.asyncio

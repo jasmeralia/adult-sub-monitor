@@ -52,7 +52,10 @@ class BrowserManager:
             context_options = {**context_options, "user_agent": self.user_agent}
 
         if not site.requires_auth:
-            return await self._browser.new_context(**context_options)
+            context = await self._browser.new_context(**context_options)
+            for script in site.init_scripts():
+                await context.add_init_script(script)
+            return context
 
         storage_state_path = self.sessions_dir / f"{site.name}.json"
         has_state = storage_state_path.exists()
@@ -63,6 +66,8 @@ class BrowserManager:
             }
 
         context = await self._browser.new_context(**context_options)
+        for script in site.init_scripts():
+            await context.add_init_script(script)
         page = await context.new_page()
 
         await page.goto(site.probe_url)

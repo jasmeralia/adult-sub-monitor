@@ -24,6 +24,20 @@ class ManyVidsCreator(BaseModel):
     display_name: str | None = None
 
 
+class ManyVidsScrapingConfig(BaseModel):
+    delay_between_creators_min: float = 30
+    delay_between_creators_max: float = 60
+    delay_between_pages_min: float = 3
+    delay_between_pages_max: float = 8
+    page_timeout: int = 30000
+    max_retries: int = 3
+    retry_backoff_base: float = 10
+    user_agent: str = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    )
+
+
 class SiteConfig(BaseModel):
     name: str
     display_name: str | None = None
@@ -70,3 +84,4 @@ class AppConfig(BaseModel):
     log_level: str = "INFO"
     headless: bool = True
     user_agent: str | None = None
+    manyvids: ManyVidsScrapingConfig | None = None

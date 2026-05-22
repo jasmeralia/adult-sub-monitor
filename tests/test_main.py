@@ -11,7 +11,7 @@ from adult_sub_monitor.main import (
     _scheduler_jitter_seconds,
     _send_notification,
 )
-from adult_sub_monitor.models import AppConfig, Item, SiteConfig
+from adult_sub_monitor.models import AppConfig, Item, ManyVidsCreator, SiteConfig
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +50,7 @@ def test_build_site_unknown_type_raises() -> None:
     site_config = cast(SiteConfig, SimpleNamespace(type="unknown", name="bad-site"))
 
     with pytest.raises(ValueError, match="Unsupported site type: unknown"):
-        _build_site(site_config)
+        _build_site(site_config, build_config([]))
 
 
 def test_build_site_known_types() -> None:
@@ -65,8 +65,23 @@ def test_build_site_known_types() -> None:
         credentials_env_user="WOWGIRLS_USERNAME",
         credentials_env_pass="WOWGIRLS_PASSWORD",
     )
-    assert _build_site(venus_config).name == "test_site"
-    assert _build_site(wowgirls_config).name == "wowgirls-test"
+    manyvids_config = SiteConfig(
+        name="manyvids-test",
+        display_name="ManyVids",
+        type="manyvids",
+        base_url="https://www.manyvids.com",
+        creators=[
+            ManyVidsCreator(
+                creator_id="1002990973",
+                creator_name="creator_slug",
+            )
+        ],
+    )
+    app_config = build_config([venus_config, wowgirls_config, manyvids_config])
+
+    assert _build_site(venus_config, app_config).name == "test_site"
+    assert _build_site(wowgirls_config, app_config).name == "wowgirls-test"
+    assert _build_site(manyvids_config, app_config).name == "manyvids-test"
 
 
 @pytest.mark.asyncio

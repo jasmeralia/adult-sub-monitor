@@ -4,7 +4,12 @@ import pytest
 from pydantic import ValidationError
 
 from adult_sub_monitor.config import load_config
-from adult_sub_monitor.models import AppConfig, SiteConfig
+from adult_sub_monitor.models import (
+    AppConfig,
+    ManyVidsCreator,
+    ManyVidsScrapingConfig,
+    SiteConfig,
+)
 
 
 def test_load_config_valid(tmp_path: Path) -> None:
@@ -80,6 +85,38 @@ def test_existing_authenticated_site_config_validates() -> None:
     )
 
     assert config.type == "venus_platform"
+
+
+def test_manyvids_site_config_does_not_require_auth_fields() -> None:
+    config = SiteConfig(
+        name="manyvids",
+        display_name="ManyVids",
+        type="manyvids",
+        base_url="https://www.manyvids.com",
+        creators=[
+            ManyVidsCreator(
+                creator_id="1002990973",
+                creator_name="creator_slug",
+                display_name="Creator Name",
+            )
+        ],
+    )
+
+    assert config.login_url is None
+    assert config.creators[0].display_name == "Creator Name"
+
+
+def test_app_config_accepts_manyvids_scraping_config() -> None:
+    config = AppConfig(
+        sites=[],
+        manyvids=ManyVidsScrapingConfig(
+            delay_between_creators_min=1,
+            delay_between_creators_max=2,
+        ),
+    )
+
+    assert config.manyvids is not None
+    assert config.manyvids.delay_between_creators_min == 1
 
 
 def test_non_manyvids_site_requires_login_url() -> None:
