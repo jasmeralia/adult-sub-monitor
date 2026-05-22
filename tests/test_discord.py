@@ -4,11 +4,17 @@ import aiohttp
 import pytest
 from aioresponses import CallbackResult, aioresponses
 
-from adult_sub_monitor.discord import send_video_notification
+from adult_sub_monitor.discord import _build_embed, send_video_notification
 from adult_sub_monitor.models import Item
 
 
-def build_item() -> Item:
+def build_item(
+    *,
+    duration: str | None = None,
+    price: str | None = None,
+    video_type: str | None = None,
+    creator: str | None = None,
+) -> Item:
     return Item(
         site_name="test_site",
         item_id="item-1",
@@ -17,6 +23,10 @@ def build_item() -> Item:
         thumbnail_url="https://example.com/thumbs/item-1.jpg",
         performers=["Performer One"],
         tags=["tag-one", "tag-two"],
+        duration=duration,
+        price=price,
+        video_type=video_type,
+        creator=creator,
     )
 
 
@@ -96,3 +106,49 @@ async def test_network_error_returns_false() -> None:
 async def test_empty_webhook_raises() -> None:
     with pytest.raises(ValueError, match="webhook_url must not be empty"):
         await send_video_notification("", build_item())
+
+
+def test_embed_includes_metadata_fields_when_present() -> None:
+    embed = _build_embed(
+        build_item(
+            creator="Creator Name",
+            video_type="regular",
+            duration="12:34",
+            price="5.99",
+        )
+    )
+
+    fields = cast(list[dict[str, Any]], embed["fields"])
+    assert fields[0] == {
+        "name": "Performers",
+        "value": "Performer One",
+        "inline": False,
+    }
+    assert fields[1] == {
+        "name": "Tags",
+        "value": "tag-one, tag-two",
+        "inline": False,
+    }
+    assert fields[2:] == [
+        {"name": "Creator", "value": "Creator Name", "inline": True},
+        {"name": "Type", "value": "Regular", "inline": True},
+        {"name": "Duration", "value": "12:34", "inline": True},
+        {"name": "Price", "value": "5.99", "inline": True},
+    ]
+
+
+def test_embed_omits_metadata_fields_when_absent() -> None:
+    embed = _build_embed(build_item())
+
+    fields = cast(list[dict[str, Any]], embed["fields"])
+    field_names = {field["name"] for field in fields}
+    assert field_names == {"Performers", "Tags"}
+
+
+@pytest.mark.parametrize("price", [None, ""])
+def test_embed_renders_missing_price_as_free(price: str | None) -> None:
+    embed = _build_embed(build_item(creator="Creator Name", price=price))
+
+    fields = cast(list[dict[str, Any]], embed["fields"])
+    price_field = next(field for field in fields if field["name"] == "Price")
+    assert price_field == {"name": "Price", "value": "Free", "inline": True}

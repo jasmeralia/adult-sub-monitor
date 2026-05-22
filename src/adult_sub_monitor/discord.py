@@ -51,6 +51,43 @@ def _build_embed(item: Item) -> dict[str, object]:
             }
         )
 
+    if item.creator:
+        fields.append(
+            {
+                "name": "Creator",
+                "value": _truncate_field(item.creator),
+                "inline": True,
+            }
+        )
+
+    if item.video_type:
+        fields.append(
+            {
+                "name": "Type",
+                "value": _truncate_field(item.video_type.title()),
+                "inline": True,
+            }
+        )
+
+    if item.duration:
+        fields.append(
+            {
+                "name": "Duration",
+                "value": _truncate_field(item.duration),
+                "inline": True,
+            }
+        )
+
+    if item.price is not None or item.creator or item.video_type or item.duration:
+        price = item.price.strip() if item.price is not None else ""
+        fields.append(
+            {
+                "name": "Price",
+                "value": _truncate_field(price or "Free"),
+                "inline": True,
+            }
+        )
+
     embed["fields"] = fields
     return embed
 
