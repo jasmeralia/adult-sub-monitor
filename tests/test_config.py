@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from adult_sub_monitor.config import load_config
-from adult_sub_monitor.models import AppConfig
+from adult_sub_monitor.models import AppConfig, SiteConfig
 
 
 def test_load_config_valid(tmp_path: Path) -> None:
@@ -65,6 +65,34 @@ sites:
 
     with pytest.raises(ValidationError):
         load_config(config_path)
+
+
+def test_existing_authenticated_site_config_validates() -> None:
+    config = SiteConfig(
+        name="test_site",
+        type="venus_platform",
+        base_url="https://example.com",
+        login_url="https://example.com/login",
+        probe_url="https://example.com/account",
+        listing_url="https://example.com/videos",
+        credentials_env_user="TEST_USER",
+        credentials_env_pass="TEST_PASS",
+    )
+
+    assert config.type == "venus_platform"
+
+
+def test_non_manyvids_site_requires_login_url() -> None:
+    with pytest.raises(ValidationError, match="login_url"):
+        SiteConfig(
+            name="test_site",
+            type="venus_platform",
+            base_url="https://example.com",
+            probe_url="https://example.com/account",
+            listing_url="https://example.com/videos",
+            credentials_env_user="TEST_USER",
+            credentials_env_pass="TEST_PASS",
+        )
 
 
 def test_invalid_typed_value_raises_validation_error(tmp_path: Path) -> None:
