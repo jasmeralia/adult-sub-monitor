@@ -1,50 +1,97 @@
-sites:
-  - name: sensual_love
-    display_name: sensual.love
-    type: venus_platform
-    base_url: https://venus.sensual.love
-    login_url: https://venus.sensual.love/login
-    probe_url: https://venus.sensual.love/members/content
-    listing_url: https://venus.sensual.love/members/content
-    interval_hours: 6
-    credentials_env_user: SENSUAL_USER
-    credentials_env_pass: SENSUAL_PASS
+# Example adult-sub-monitor configuration.
+#
+# Copy this file to config/config.yaml, then replace the placeholder webhook
+# and credentials before running the service. Authenticated sites can use either
+# environment variable names or literal values in credentials_env_user and
+# credentials_env_pass; using environment variables is recommended.
 
-  - name: wowgirls
-    display_name: wowgirls.com
-    type: wowgirls_platform
-    base_url: https://venus.wowgirls.com
-    login_url: https://venus.wowgirls.com/login
-    probe_url: https://venus.wowgirls.com/updates/
-    listing_url: https://venus.wowgirls.com/updates/
-    interval_hours: 6
-    credentials_env_user: WOWGIRLS_USER
-    credentials_env_pass: WOWGIRLS_PASS
-
-  - name: ultrafilms
-    display_name: ultrafilms.com
-    type: venus_platform
-    base_url: https://venus.ultrafilms.com
-    login_url: https://venus.ultrafilms.com/login
-    probe_url: https://venus.ultrafilms.com/members/content
-    listing_url: https://venus.ultrafilms.com/members/content
-    interval_hours: 6
-    credentials_env_user: ULTRAFILMS_USER
-    credentials_env_pass: ULTRAFILMS_PASS
-
-  - name: angels_love
-    display_name: angels.love
-    type: venus_platform
-    base_url: https://venus.angels.love
-    login_url: https://venus.angels.love/login
-    probe_url: https://venus.angels.love/members/content
-    listing_url: https://venus.angels.love/members/content
-    interval_hours: 6
-    credentials_env_user: ANGELS_USER
-    credentials_env_pass: ANGELS_PASS
-
-discord_webhook_env: DISCORD_WEBHOOK_URL
 db_path: /data/monitor.db
-sessions_dir: /data/sessions
-log_level: INFO
+discord_webhook_env: https://discord.com/api/webhooks/REPLACE_ME
 headless: true
+log_level: INFO
+sessions_dir: /data/sessions
+
+# Optional global browser user agent override. Leave unset to use Playwright's
+# default, except ManyVids also has a site-specific user_agent setting below.
+# user_agent: Mozilla/5.0 (...)
+
+sites:
+  # Venus platform sites require authentication. The scraper persists browser
+  # storage state under sessions_dir and fetches per-video detail pages for tags.
+  - base_url: https://venus.sensual.love
+    credentials_env_pass: CHANGE_ME_PASS
+    credentials_env_user: CHANGE_ME_USER
+    display_name: sensual.love
+    enabled: true
+    interval_hours: 6
+    listing_url: https://venus.sensual.love/members/content
+    login_url: https://venus.sensual.love/login
+    name: sensual_love
+    probe_url: https://venus.sensual.love/members/content
+    type: venus_platform
+
+  - base_url: https://venus.ultrafilms.com
+    credentials_env_pass: CHANGE_ME_PASS
+    credentials_env_user: CHANGE_ME_USER
+    display_name: ultrafilms.com
+    enabled: true
+    interval_hours: 6
+    listing_url: https://venus.ultrafilms.com/members/content
+    login_url: https://venus.ultrafilms.com/login
+    name: ultrafilms
+    probe_url: https://venus.ultrafilms.com/members/content
+    type: venus_platform
+
+  - base_url: https://venus.angels.love
+    credentials_env_pass: CHANGE_ME_PASS
+    credentials_env_user: CHANGE_ME_USER
+    display_name: angels.love
+    enabled: true
+    interval_hours: 6
+    listing_url: https://venus.angels.love/members/content
+    login_url: https://venus.angels.love/login
+    name: angels_love
+    probe_url: https://venus.angels.love/members/content
+    type: venus_platform
+
+  # WowGirls uses its own site type because its listings differ from the shared
+  # Venus scraper, but it is still an authenticated browser session.
+  - base_url: https://venus.wowgirls.com
+    credentials_env_pass: CHANGE_ME_PASS
+    credentials_env_user: CHANGE_ME_USER
+    display_name: wowgirls.com
+    enabled: true
+    interval_hours: 6
+    listing_url: https://venus.wowgirls.com/updates/
+    login_url: https://venus.wowgirls.com/login
+    name: wowgirls
+    probe_url: https://venus.wowgirls.com/updates/
+    type: wowgirls_platform
+
+  # ManyVids creator stores are public and scraped anonymously. Configure one
+  # manyvids SiteConfig and list every creator store under creators.
+  - base_url: https://www.manyvids.com
+    display_name: ManyVids
+    enabled: true
+    interval_hours: 24
+    name: manyvids
+    type: manyvids
+    creators:
+      - creator_id: "1002990973"
+        creator_name: karneli_bandi
+        display_name: Karneli Bandi
+
+# Optional ManyVids scraping tunables. These are the defaults baked into
+# ManyVidsScrapingConfig; keep the block here only when you want to override
+# pacing, timeouts, retry behavior, or the ManyVids-specific user agent.
+manyvids:
+  delay_between_creators_min: 30
+  delay_between_creators_max: 60
+  delay_between_pages_min: 3
+  delay_between_pages_max: 8
+  page_timeout: 30000
+  max_retries: 3
+  retry_backoff_base: 10
+  user_agent: >-
+    Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
+    (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36

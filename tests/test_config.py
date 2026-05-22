@@ -46,10 +46,12 @@ def test_load_example_config() -> None:
     assert isinstance(config, AppConfig)
     assert [site.name for site in config.sites] == [
         "sensual_love",
-        "wowgirls",
         "ultrafilms",
         "angels_love",
+        "wowgirls",
+        "manyvids",
     ]
+    assert config.manyvids is not None
 
 
 def test_missing_required_field_raises(tmp_path: Path) -> None:

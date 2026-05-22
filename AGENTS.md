@@ -2,7 +2,7 @@
 
 ## 1. Project overview
 
-adult-sub-monitor is a Dockerized Python service that monitors subscription video sites, persists sessions where authentication is required, detects new videos, deduplicates them in SQLite, and sends Discord webhook notifications; see [docs/DESIGN.md](docs/DESIGN.md) for the full design.
+adult-sub-monitor is a Dockerized Python service that monitors subscription and public creator video sites, persists sessions where authentication is required, detects new videos, deduplicates them in SQLite, and sends Discord webhook notifications. It currently supports Venus platform sites, WowGirls, and anonymous ManyVids creator-store monitoring; see [docs/DESIGN.md](docs/DESIGN.md) for the full design.
 
 ## 2. Repo conventions
 
@@ -30,9 +30,11 @@ Use spaces only, no tabs. Do not leave trailing whitespace. Linting runs through
 
 `browser.py` manages Playwright Chromium state, per-site browser contexts, persisted storage state, and the authentication probe/login flow.
 
-`sites/base.py` defines the `BaseSite` abstract interface that every site implementation must satisfy, including login, authentication checks, interstitial handling, and video scraping.
+`sites/base.py` defines the `BaseSite` interface that every site implementation must satisfy, including authentication hooks, interstitial handling, browser context hooks, and video scraping.
 
-`sites/venus_platform.py` implements the shared Venus platform scraper for the four `venus.*` sites, using `/videos` listings plus per-card video checks to exclude photo sets.
+`sites/venus_platform.py` implements the shared Venus platform scraper for the Venus subscription sites, using video listings plus per-card video checks to exclude photo sets.
+
+`sites/manyvids.py` implements anonymous ManyVids creator-store scraping, including regular/mobile store pagination, retry/backoff behavior, and per-video tag extraction.
 
 `main.py` orchestrates config loading, logging, scheduling, per-site checks, deduplication, notifications, retry handling, and graceful shutdown.
 
@@ -42,6 +44,8 @@ Use spaces only, no tabs. Do not leave trailing whitespace. Linting runs through
 2. Register it in `_build_site()`.
 3. Add tests mocking browser interactions.
 4. Update the README sites table.
+
+Use the `BaseSite` hooks when a site differs from the authenticated default: set `requires_auth = False` for anonymous sites, override `context_options()` for browser context kwargs, and override `init_scripts()` for context init scripts.
 
 ## 7. Testing
 
