@@ -2,7 +2,7 @@
 
 ## 1. Project overview
 
-adult-sub-monitor is a Dockerized Python service that logs into authenticated subscription video sites, persists sessions, detects new videos, deduplicates them in SQLite, and sends Discord webhook notifications; see [docs/DESIGN.md](docs/DESIGN.md) for the full design.
+adult-sub-monitor is a Dockerized Python service that monitors subscription video sites, persists sessions where authentication is required, detects new videos, deduplicates them in SQLite, and sends Discord webhook notifications; see [docs/DESIGN.md](docs/DESIGN.md) for the full design.
 
 ## 2. Repo conventions
 
@@ -33,8 +33,6 @@ Use spaces only, no tabs. Do not leave trailing whitespace. Linting runs through
 `sites/base.py` defines the `BaseSite` abstract interface that every site implementation must satisfy, including login, authentication checks, interstitial handling, and video scraping.
 
 `sites/venus_platform.py` implements the shared Venus platform scraper for the four `venus.*` sites, using `/videos` listings plus per-card video checks to exclude photo sets.
-
-`sites/vixen_media_group_platform.py` implements the shared Vixen Media Group platform scraper, including the intermittent post-login interstitial dismissal flow.
 
 `main.py` orchestrates config loading, logging, scheduling, per-site checks, deduplication, notifications, retry handling, and graceful shutdown.
 

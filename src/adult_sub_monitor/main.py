@@ -18,7 +18,6 @@ from adult_sub_monitor.discord import send_video_notification
 from adult_sub_monitor.models import Item, SiteConfig
 from adult_sub_monitor.sites.base import BaseSite
 from adult_sub_monitor.sites.venus_platform import VenusPlatformSite
-from adult_sub_monitor.sites.vixen_media_group_platform import VixenMediaGroupSite
 from adult_sub_monitor.sites.wowgirls_platform import WowgirlsPlatformSite
 
 logger = logging.getLogger(__name__)
@@ -30,8 +29,6 @@ def _build_site(site_config: SiteConfig) -> BaseSite:
         return VenusPlatformSite(site_config)
     if site_config.type == "wowgirls_platform":
         return WowgirlsPlatformSite(site_config)
-    if site_config.type == "vixen_media_group_platform":
-        return VixenMediaGroupSite(site_config)
 
     raise ValueError(f"Unsupported site type: {site_config.type}")
 

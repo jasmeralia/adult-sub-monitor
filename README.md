@@ -1,6 +1,6 @@
 # adult-sub-monitor
 
-Dockerized Python service that monitors authenticated subscription video sites, detects new videos, and sends Discord webhook notifications. Sister project to mv_video_monitor. Handles form-based login and session persistence.
+Dockerized Python service that monitors subscription video sites, detects new videos, and sends Discord webhook notifications. Handles form-based login and session persistence for authenticated sites.
 
 ## Prerequisites
 
@@ -29,8 +29,6 @@ Dockerized Python service that monitors authenticated subscription video sites, 
 
 | Site | Family | Notes |
 |---|---|---|
-| `members.deeper.com` | Vixen Media Group platform | Intermittent post-login interstitial |
-| `members.tushy.com` | Vixen Media Group platform | Intermittent post-login interstitial |
 | `venus.angels.love` | Venus platform | Mixes videos and photo sets |
 | `venus.sensual.love` | Venus platform | Mixes videos and photo sets |
 | `venus.wowgirls.com` | Venus platform | Mixes videos and photo sets |

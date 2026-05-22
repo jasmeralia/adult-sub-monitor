@@ -65,20 +65,8 @@ def test_build_site_known_types() -> None:
         credentials_env_user="WOWGIRLS_USERNAME",
         credentials_env_pass="WOWGIRLS_PASSWORD",
     )
-    deeper_config = SiteConfig(
-        name="deeper-test",
-        type="vixen_media_group_platform",
-        base_url="https://deeper.example",
-        login_url="https://deeper.example/login",
-        probe_url="https://deeper.example/account",
-        listing_url="https://deeper.example/videos",
-        credentials_env_user="DEEPER_USERNAME",
-        credentials_env_pass="DEEPER_PASSWORD",
-    )
-
     assert _build_site(venus_config).name == "test_site"
     assert _build_site(wowgirls_config).name == "wowgirls-test"
-    assert _build_site(deeper_config).name == "deeper-test"
 
 
 @pytest.mark.asyncio

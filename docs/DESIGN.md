@@ -2,14 +2,11 @@
 
 ## Overview
 
-A Dockerized Python service that periodically logs into authenticated subscription
-video sites, detects newly published videos, and notifies a Discord webhook. Photo
-sets and other non-video content are ignored. Sessions are persisted to disk and
-re-used until they expire, at which point the service re-authenticates via Playwright.
-
-This is a sister project to `mv_video_monitor` (which monitors public ManyVids
-storefronts). This project handles **authenticated** sites with form-based logins
-and short-lived sessions.
+A Dockerized Python service that periodically monitors subscription video sites,
+detects newly published videos, and notifies a Discord webhook. Photo sets and
+other non-video content are ignored. Sessions are persisted to disk for sites
+that require authentication and re-used until they expire, at which point the
+service re-authenticates via Playwright.
 
 **Repo name:** `adult-sub-monitor` (dashes — see naming convention notes).
 **Status:** Current implementation scope (this document).
@@ -20,7 +17,7 @@ and short-lived sessions.
 
 ### Goals
 
-- Authenticate to six subscription sites via form login (Playwright).
+- Authenticate to subscription sites via form login where required (Playwright).
 - Persist session cookies between runs; re-authenticate only when sessions expire.
 - Detect new videos (only — never photo sets) on each site every N hours.
 - Notify a Discord webhook with title, URL, thumbnail, performers, and tags.
@@ -35,7 +32,7 @@ and short-lived sessions.
 - Automatic video downloading.
 - Plex/Jellyfin library integration.
 - Photo set notifications (explicitly excluded).
-- Sites beyond the six listed below (extensible, but not in scope).
+- Sites beyond the listed families below (extensible, but not in scope).
 - Multi-recipient or multi-channel notifications (Discord webhook only).
 - Web UI or admin dashboard (CLI/config-file only).
 
@@ -45,17 +42,13 @@ and short-lived sessions.
 
 | Site                       | Family          | Notes                                       |
 |----------------------------|-----------------|---------------------------------------------|
-| `members.deeper.com`       | Vixen Media Group platform | Intermittent post-login interstitial        |
-| `members.tushy.com`        | Vixen Media Group platform | Intermittent post-login interstitial        |
 | `venus.angels.love`        | Venus platform  | Mixes videos and photo sets                 |
 | `venus.sensual.love`       | Venus platform  | Mixes videos and photo sets                 |
 | `venus.wowgirls.com`       | Venus platform  | Mixes videos and photo sets                 |
 | `venus.ultrafilms.com`     | Venus platform  | Mixes videos and photo sets                 |
 
-The four `venus.*` sites share a common platform; one scraper class
-(`VenusPlatformSite`) covers all four with per-site config. Deeper and Tushy
-share the Vixen Media Group platform; one class (`VixenMediaGroupSite`) covers
-both.
+The `venus.*` sites share a common platform; one scraper class
+(`VenusPlatformSite`) covers them with per-site config.
 
 ---
 
@@ -88,7 +81,7 @@ adult-sub-monitor/
 │           ├── __init__.py
 │           ├── base.py           # BaseSite ABC
 │           ├── venus_platform.py
-│           └── vixen_media_group_platform.py
+│           └── wowgirls_platform.py
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py
@@ -101,7 +94,7 @@ adult-sub-monitor/
 │       ├── __init__.py
 │       ├── test_base.py
 │       ├── test_venus_platform.py
-│       └── test_vixen_media_group_platform.py
+│       └── test_wowgirls_platform.py
 ├── .dockerignore
 ├── .gitignore
 ├── .python-version              # 3.13
@@ -185,15 +178,6 @@ mechanism for video-only filtering. As a defence-in-depth measure, the scraper
 also checks each card's content-type indicator (DOM attribute or class name)
 before yielding it.
 
-**`sites/vixen_media_group_platform.py` — VixenMediaGroupSite**
-
-Single class parameterised by `base_url`. Implements `dismiss_interstitial`:
-runs once post-login, looks for the continue button with a 5-second timeout,
-clicks if present, no-op if absent. Not called on cookie-restore path (the
-interstitial is post-login only).
-
----
-
 ## Data Model
 
 ### SQLite Schema
@@ -245,7 +229,7 @@ class Item(BaseModel):
 
 class SiteConfig(BaseModel):
     name: str
-    type: Literal["venus_platform", "vixen_media_group_platform"]
+    type: Literal["venus_platform", "wowgirls_platform"]
     base_url: HttpUrl
     login_url: HttpUrl
     probe_url: HttpUrl
@@ -272,26 +256,6 @@ class AppConfig(BaseModel):
 
 ```yaml
 sites:
-  - name: tushy
-    type: vixen_media_group_platform
-    base_url: https://members.tushy.com
-    login_url: https://members.tushy.com/login
-    probe_url: https://members.tushy.com/videos
-    listing_url: https://members.tushy.com/videos
-    interval_hours: 6
-    credentials_env_user: TUSHY_USER
-    credentials_env_pass: TUSHY_PASS
-
-  - name: deeper
-    type: vixen_media_group_platform
-    base_url: https://members.deeper.com
-    login_url: https://members.deeper.com/login
-    probe_url: https://members.deeper.com/videos
-    listing_url: https://members.deeper.com/videos
-    interval_hours: 6
-    credentials_env_user: DEEPER_USER
-    credentials_env_pass: DEEPER_PASS
-
   - name: sensual_love
     type: venus_platform
     base_url: https://venus.sensual.love
@@ -410,34 +374,6 @@ Both layers are required. The listing URL filter alone is fragile (sites
 sometimes mix content into video listings via "recommended for you" widgets);
 the per-item check alone is fragile (selectors change). Together they're
 robust.
-
----
-
-## Intermittent interstitial handling (Deeper / Tushy)
-
-Confirmed: the interstitial only appears immediately post-login, never
-mid-session and never after a cookie restore.
-
-```python
-async def dismiss_interstitial(self, page: Page) -> bool:
-    try:
-        btn = await page.wait_for_selector(
-            'a:text("Continue"), button:text("Continue")',
-            timeout=5000,
-        )
-        if btn is None:
-            return False
-        await btn.click()
-        await page.wait_for_load_state("networkidle", timeout=15000)
-        return True
-    except PlaywrightTimeoutError:
-        return False
-```
-
-Called exactly once, immediately after `login()` returns successfully. Not
-called after cookie restore (since the interstitial is post-login only).
-A short 5-second timeout means missing interstitials add at most 5 seconds
-per re-auth, which happens at most a few times per site per day.
 
 ---
 
@@ -583,7 +519,7 @@ services:
 | `main.py`                       | `tests/test_main.py`                   | Mocked scheduler, mocked sites         |
 | `sites/base.py`                 | `tests/sites/test_base.py`             | Concrete test subclass                 |
 | `sites/venus_platform.py`       | `tests/sites/test_venus_platform.py`   | HTML fixtures + AsyncMock pages        |
-| `sites/vixen_media_group_platform.py` | `tests/sites/test_vixen_media_group_platform.py` | HTML fixtures + interstitial scenarios |
+| `sites/wowgirls_platform.py`      | `tests/sites/test_wowgirls_platform.py`   | HTML fixtures                          |
 
 ### Key test cases
 
@@ -604,11 +540,6 @@ services:
 - `ensure_authenticated`: probe says not logged in → calls login, dismisses interstitial
 - Cookie restore path: never calls `dismiss_interstitial`
 - Storage state persisted after successful auth
-
-**`test_vixen_media_group_platform.py`**
-- Interstitial present: clicked, returns True
-- Interstitial absent: returns False after timeout (no error)
-- Interstitial click fails: returns False, logs warning, no exception
 
 **`test_venus_platform.py`**
 - Listing with only videos → all returned
