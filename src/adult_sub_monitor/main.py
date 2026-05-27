@@ -56,6 +56,68 @@ async def _send_notification(webhook_url: str, item: Item) -> tuple[bool, str | 
     return True, None
 
 
+def _resolve_webhook(site_config: SiteConfig, default_webhook: str) -> str:
+    override = site_config.discord_webhook
+    if override is not None and override.strip():
+        return override
+    return default_webhook
+
+
+async def _dispatch_new_items(
+    items: list[Item],
+    site_name: str,
+    db: Database,
+    webhook_url: str,
+    notifications_enabled: bool,
+    dry_run: bool,
+) -> None:
+    for item in items:
+        if dry_run:
+            logger.info(
+                "DRY_RUN: would mark seen and notify %s:%s",
+                item.site_name,
+                item.item_id,
+            )
+            continue
+
+        is_new = await db.mark_seen(item)
+        if not is_new:
+            continue
+
+        if not notifications_enabled:
+            logger.debug(
+                "Notifications disabled for %s; recorded %s as seen "
+                "without dispatching",
+                site_name,
+                item.item_id,
+            )
+            continue
+
+        success, error = await _send_notification(webhook_url, item)
+        if success:
+            await db.mark_notified(item)
+        else:
+            await db.record_failed_notification(
+                item,
+                error or "Unknown notification error",
+            )
+
+
+async def _retry_pending_notifications(
+    db: Database,
+    webhook_url: str,
+) -> None:
+    for item in await db.get_pending_retries(max_attempts=10):
+        success, error = await _send_notification(webhook_url, item)
+        if success:
+            await db.mark_notified(item)
+        else:
+            await db.record_failed_notification(
+                item,
+                error or "Unknown notification retry error",
+            )
+
+
 async def _check_site(
     site: BaseSite,
     site_config: SiteConfig,
@@ -65,6 +127,8 @@ async def _check_site(
     dry_run: bool,
 ) -> None:
     lock = _site_locks.setdefault(site.name, asyncio.Lock())
+    notifications_enabled = site_config.notifications_enabled
+    effective_webhook = _resolve_webhook(site_config, webhook_url)
 
     async with lock:
         logger.info("Checking site %s", site.name)
@@ -75,41 +139,27 @@ async def _check_site(
                 await page.goto(str(site_config.listing_url))
             items = await site.get_latest_items(page, db)
 
-            for item in items:
-                if dry_run:
-                    logger.info(
-                        "DRY_RUN: would mark seen and notify %s:%s",
-                        item.site_name,
-                        item.item_id,
-                    )
-                    continue
-
-                is_new = await db.mark_seen(item)
-                if not is_new:
-                    continue
-
-                success, error = await _send_notification(webhook_url, item)
-                if success:
-                    await db.mark_notified(item)
-                else:
-                    await db.record_failed_notification(
-                        item,
-                        error or "Unknown notification error",
-                    )
+            await _dispatch_new_items(
+                items,
+                site.name,
+                db,
+                effective_webhook,
+                notifications_enabled,
+                dry_run,
+            )
 
             if dry_run:
                 logger.info("DRY_RUN: skipping pending notification retries")
                 return
 
-            for item in await db.get_pending_retries(max_attempts=10):
-                success, error = await _send_notification(webhook_url, item)
-                if success:
-                    await db.mark_notified(item)
-                else:
-                    await db.record_failed_notification(
-                        item,
-                        error or "Unknown notification retry error",
-                    )
+            if not notifications_enabled:
+                logger.debug(
+                    "Notifications disabled for %s; skipping pending retries",
+                    site.name,
+                )
+                return
+
+            await _retry_pending_notifications(db, effective_webhook)
         finally:
             await context.close()
 

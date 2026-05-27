@@ -50,6 +50,8 @@ class SiteConfig(BaseModel):
     credentials_env_user: str | None = None
     credentials_env_pass: str | None = None
     enabled: bool = True
+    notifications_enabled: bool = True
+    discord_webhook: str | None = None
     creators: list[ManyVidsCreator] = Field(default_factory=list)
 
     @model_validator(mode="after")

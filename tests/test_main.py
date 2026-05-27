@@ -8,6 +8,7 @@ import pytest
 from adult_sub_monitor.main import (
     _build_site,
     _check_site,
+    _resolve_webhook,
     _scheduler_jitter_seconds,
     _send_notification,
 )
@@ -361,3 +362,127 @@ async def test_duplicate_item_skips_notification(mocker) -> None:
 
     send_video_notification.assert_not_called()
     db.mark_notified.assert_not_called()
+
+
+def test_resolve_webhook_uses_override_when_set() -> None:
+    site_config = build_site_config()
+    site_config = site_config.model_copy(
+        update={"discord_webhook": "https://discord.example/per-site"}
+    )
+
+    assert (
+        _resolve_webhook(site_config, "https://discord.example/global")
+        == "https://discord.example/per-site"
+    )
+
+
+def test_resolve_webhook_falls_back_to_default_when_override_none() -> None:
+    site_config = build_site_config()
+
+    assert (
+        _resolve_webhook(site_config, "https://discord.example/global")
+        == "https://discord.example/global"
+    )
+
+
+def test_resolve_webhook_treats_empty_override_as_unset() -> None:
+    site_config = build_site_config()
+    site_config = site_config.model_copy(update={"discord_webhook": "   "})
+
+    assert (
+        _resolve_webhook(site_config, "https://discord.example/global")
+        == "https://discord.example/global"
+    )
+
+
+@pytest.mark.asyncio
+async def test_per_site_discord_webhook_override(mocker) -> None:
+    item = build_item()
+    site_config = build_site_config().model_copy(
+        update={"discord_webhook": "https://discord.example/per-site"}
+    )
+    site = build_site(items=[item])
+    db = AsyncMock()
+    db.mark_seen = AsyncMock(return_value=True)
+    db.get_pending_retries = AsyncMock(return_value=[])
+    browser_manager = AsyncMock()
+    browser_manager.ensure_authenticated = AsyncMock(return_value=build_context())
+    send_video_notification = mocker.patch(
+        "adult_sub_monitor.main.send_video_notification",
+        new=AsyncMock(return_value=True),
+    )
+
+    await _check_site(
+        site,
+        site_config,
+        browser_manager,
+        db,
+        "https://discord.example/global",
+        False,
+    )
+
+    send_video_notification.assert_awaited_once_with(
+        "https://discord.example/per-site",
+        item,
+    )
+
+
+@pytest.mark.asyncio
+async def test_notifications_disabled_marks_seen_without_dispatch(mocker) -> None:
+    item = build_item()
+    site_config = build_site_config().model_copy(
+        update={"notifications_enabled": False}
+    )
+    site = build_site(items=[item])
+    db = AsyncMock()
+    db.mark_seen = AsyncMock(return_value=True)
+    db.get_pending_retries = AsyncMock(return_value=[])
+    browser_manager = AsyncMock()
+    browser_manager.ensure_authenticated = AsyncMock(return_value=build_context())
+    send_video_notification = mocker.patch(
+        "adult_sub_monitor.main.send_video_notification",
+        new=AsyncMock(),
+    )
+
+    await _check_site(
+        site,
+        site_config,
+        browser_manager,
+        db,
+        "https://discord.example/global",
+        False,
+    )
+
+    db.mark_seen.assert_awaited_once_with(item)
+    send_video_notification.assert_not_called()
+    db.mark_notified.assert_not_called()
+    db.record_failed_notification.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_notifications_disabled_skips_retry_loop(mocker) -> None:
+    item = build_item()
+    site_config = build_site_config().model_copy(
+        update={"notifications_enabled": False}
+    )
+    site = build_site(items=[])
+    db = AsyncMock()
+    db.get_pending_retries = AsyncMock(return_value=[item])
+    browser_manager = AsyncMock()
+    browser_manager.ensure_authenticated = AsyncMock(return_value=build_context())
+    send_video_notification = mocker.patch(
+        "adult_sub_monitor.main.send_video_notification",
+        new=AsyncMock(),
+    )
+
+    await _check_site(
+        site,
+        site_config,
+        browser_manager,
+        db,
+        "https://discord.example/global",
+        False,
+    )
+
+    db.get_pending_retries.assert_not_called()
+    send_video_notification.assert_not_called()
