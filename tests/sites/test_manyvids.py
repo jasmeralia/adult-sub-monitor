@@ -220,7 +220,9 @@ def test_requires_auth_is_false() -> None:
 
 
 def test_context_options_returns_manyvids_browser_options() -> None:
-    assert _site().context_options() == {
+    site = _site()
+    assert site.context_options() == {
+        "user_agent": site.scraping.user_agent,
         "viewport": {"width": 1920, "height": 1080},
         "locale": "en-US",
         "timezone_id": "America/New_York",
