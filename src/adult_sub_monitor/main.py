@@ -15,23 +15,26 @@ from adult_sub_monitor.browser import BrowserManager
 from adult_sub_monitor.config import load_config
 from adult_sub_monitor.db import Database
 from adult_sub_monitor.discord import send_video_notification
-from adult_sub_monitor.models import Item, SiteConfig
+from adult_sub_monitor.models import AppConfig, Item, ManyVidsScrapingConfig, SiteConfig
 from adult_sub_monitor.sites.base import BaseSite
+from adult_sub_monitor.sites.manyvids import ManyVidsSite
 from adult_sub_monitor.sites.venus_platform import VenusPlatformSite
-from adult_sub_monitor.sites.vixen_media_group_platform import VixenMediaGroupSite
 from adult_sub_monitor.sites.wowgirls_platform import WowgirlsPlatformSite
 
 logger = logging.getLogger(__name__)
 _site_locks: dict[str, asyncio.Lock] = {}
 
 
-def _build_site(site_config: SiteConfig) -> BaseSite:
+def _build_site(site_config: SiteConfig, app_config: AppConfig) -> BaseSite:
     if site_config.type == "venus_platform":
         return VenusPlatformSite(site_config)
     if site_config.type == "wowgirls_platform":
         return WowgirlsPlatformSite(site_config)
-    if site_config.type == "vixen_media_group_platform":
-        return VixenMediaGroupSite(site_config)
+    if site_config.type == "manyvids":
+        return ManyVidsSite(
+            site_config,
+            app_config.manyvids or ManyVidsScrapingConfig(),
+        )
 
     raise ValueError(f"Unsupported site type: {site_config.type}")
 
@@ -68,8 +71,9 @@ async def _check_site(
         context = await browser_manager.ensure_authenticated(site, site_config)
         try:
             page = await context.new_page()
-            await page.goto(str(site_config.listing_url))
-            items = await site.get_latest_items(page)
+            if site_config.listing_url is not None:
+                await page.goto(str(site_config.listing_url))
+            items = await site.get_latest_items(page, db)
 
             for item in items:
                 if dry_run:
@@ -127,7 +131,7 @@ async def run() -> None:
     webhook_url = os.environ.get(config.discord_webhook_env, config.discord_webhook_env)
     run_once = os.environ.get("RUN_ONCE") == "1"
     dry_run = os.environ.get("DRY_RUN") == "1"
-    active = [(sc, _build_site(sc)) for sc in config.sites if sc.enabled]
+    active = [(sc, _build_site(sc, config)) for sc in config.sites if sc.enabled]
 
     try:
         if run_once:

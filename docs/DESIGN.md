@@ -2,14 +2,12 @@
 
 ## Overview
 
-A Dockerized Python service that periodically logs into authenticated subscription
-video sites, detects newly published videos, and notifies a Discord webhook. Photo
-sets and other non-video content are ignored. Sessions are persisted to disk and
-re-used until they expire, at which point the service re-authenticates via Playwright.
-
-This is a sister project to `mv_video_monitor` (which monitors public ManyVids
-storefronts). This project handles **authenticated** sites with form-based logins
-and short-lived sessions.
+A Dockerized Python service that periodically monitors subscription and public
+creator video sites, detects newly published videos, and notifies a Discord
+webhook. Photo sets and other non-video content are ignored. Sessions are
+persisted to disk for sites that require authentication and re-used until they
+expire, at which point the service re-authenticates via Playwright. Public sites
+such as ManyVids run anonymously.
 
 **Repo name:** `adult-sub-monitor` (dashes — see naming convention notes).
 **Status:** Current implementation scope (this document).
@@ -20,7 +18,9 @@ and short-lived sessions.
 
 ### Goals
 
-- Authenticate to six subscription sites via form login (Playwright).
+- Authenticate to subscription sites via form login where required (Playwright).
+- Scrape configured public creator stores anonymously where authentication is
+  not required.
 - Persist session cookies between runs; re-authenticate only when sessions expire.
 - Detect new videos (only — never photo sets) on each site every N hours.
 - Notify a Discord webhook with title, URL, thumbnail, performers, and tags.
@@ -35,7 +35,7 @@ and short-lived sessions.
 - Automatic video downloading.
 - Plex/Jellyfin library integration.
 - Photo set notifications (explicitly excluded).
-- Sites beyond the six listed below (extensible, but not in scope).
+- Sites beyond the listed families below (extensible, but not in scope).
 - Multi-recipient or multi-channel notifications (Discord webhook only).
 - Web UI or admin dashboard (CLI/config-file only).
 
@@ -43,19 +43,18 @@ and short-lived sessions.
 
 ## Sites in Scope
 
-| Site                       | Family          | Notes                                       |
-|----------------------------|-----------------|---------------------------------------------|
-| `members.deeper.com`       | Vixen Media Group platform | Intermittent post-login interstitial        |
-| `members.tushy.com`        | Vixen Media Group platform | Intermittent post-login interstitial        |
-| `venus.angels.love`        | Venus platform  | Mixes videos and photo sets                 |
-| `venus.sensual.love`       | Venus platform  | Mixes videos and photo sets                 |
-| `venus.wowgirls.com`       | Venus platform  | Mixes videos and photo sets                 |
-| `venus.ultrafilms.com`     | Venus platform  | Mixes videos and photo sets                 |
+| Site / Source              | Family            | Notes                                      |
+|----------------------------|-------------------|--------------------------------------------|
+| `venus.angels.love`        | Venus platform    | Authenticated; mixes videos and photo sets |
+| `venus.sensual.love`       | Venus platform    | Authenticated; mixes videos and photo sets |
+| `venus.ultrafilms.com`     | Venus platform    | Authenticated; mixes videos and photo sets |
+| `venus.wowgirls.com`       | WowGirls platform | Authenticated; updates listing             |
+| ManyVids creator stores    | ManyVids          | Anonymous public creator-store scraping    |
 
-The four `venus.*` sites share a common platform; one scraper class
-(`VenusPlatformSite`) covers all four with per-site config. Deeper and Tushy
-share the Vixen Media Group platform; one class (`VixenMediaGroupSite`) covers
-both.
+The shared Venus sites use `VenusPlatformSite`; WowGirls has a dedicated
+listing scraper; ManyVids uses a single site config with a nested creator list.
+Vixen Media Group support was removed because Cloudflare anti-bot protections
+made the scraper unreliable and it is no longer in scope.
 
 ---
 
@@ -87,8 +86,9 @@ adult-sub-monitor/
 │       └── sites/
 │           ├── __init__.py
 │           ├── base.py           # BaseSite ABC
+│           ├── manyvids.py       # ManyVids public creator-store scraper
 │           ├── venus_platform.py
-│           └── vixen_media_group_platform.py
+│           └── wowgirls_platform.py
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py
@@ -100,8 +100,9 @@ adult-sub-monitor/
 │   └── sites/
 │       ├── __init__.py
 │       ├── test_base.py
+│       ├── test_manyvids.py
 │       ├── test_venus_platform.py
-│       └── test_vixen_media_group_platform.py
+│       └── test_wowgirls_platform.py
 ├── .dockerignore
 ├── .gitignore
 ├── .python-version              # 3.13
@@ -129,6 +130,10 @@ adult-sub-monitor/
 - Owns one shared Chromium instance; creates per-site `BrowserContext`.
 - Loads/saves storage state (`cookies` + `localStorage`) to
   `data/sessions/<site>.json`.
+- Skips the authentication probe/login path for sites with
+  `requires_auth = False`.
+- Forwards `site.context_options()` and `site.init_scripts()` into each
+  browser context.
 - Provides `ensure_authenticated(site, page)` helper that:
   1. Navigates to `site.probe_url`.
   2. If redirected to login, calls `site.login(page)`.
@@ -139,12 +144,15 @@ adult-sub-monitor/
 **`db.py` — SQLite layer**
 - Schema in `_apply_migrations()`; idempotent on startup.
 - Tables: `seen_items`, `failed_notifications`, `schema_version`.
+- `seen_items` includes optional metadata columns for `duration`, `price`,
+  `video_type`, and `creator` so ManyVids-specific details survive retries.
 - WAL mode enabled.
 - All access via methods on a `Database` class (easy to mock in tests).
 
 **`discord.py` — Webhook notifier**
 - Single `send_video_notification(webhook_url, item)` async function.
-- Builds Discord embed with title, URL, thumbnail, performers, tags.
+- Builds Discord embed with title, URL, thumbnail, performers, tags, and
+  optional creator/type/duration/price fields.
 - Returns success/failure; caller logs failures to `failed_notifications` table.
 - Respects Discord rate limits (1 req/sec per webhook, retry on 429).
 
@@ -154,23 +162,30 @@ adult-sub-monitor/
 class BaseSite(ABC):
     name: str
     base_url: str
-    login_url: str
-    probe_url: str
-    listing_url: str
+    login_url: str | None
+    probe_url: str | None
+    listing_url: str | None
     has_interstitial: bool = False
+    requires_auth: bool = True
 
-    @abstractmethod
-    async def login(self, page: Page) -> None: ...
+    def context_options(self) -> dict[str, object]:
+        return {}
+
+    def init_scripts(self) -> list[str]:
+        return []
+
+    async def login(self, page: Page, username: str, password: str) -> None: ...
 
     async def dismiss_interstitial(self, page: Page) -> bool:
         """Override in subclasses that need it. Default: no-op."""
         return False
 
-    @abstractmethod
     async def is_logged_in(self, page: Page) -> bool: ...
 
     @abstractmethod
-    async def get_latest_items(self, page: Page) -> list[Item]: ...
+    async def get_latest_items(
+        self, page: Page, db: Database | None = None
+    ) -> list[Item]: ...
 ```
 
 Items returned from `get_latest_items` MUST already be filtered to videos only
@@ -185,14 +200,24 @@ mechanism for video-only filtering. As a defence-in-depth measure, the scraper
 also checks each card's content-type indicator (DOM attribute or class name)
 before yielding it.
 
-**`sites/vixen_media_group_platform.py` — VixenMediaGroupSite**
+Venus also opens each video detail page to collect tags for Discord
+notifications.
 
-Single class parameterised by `base_url`. Implements `dismiss_interstitial`:
-runs once post-login, looks for the continue button with a 5-second timeout,
-clicks if present, no-op if absent. Not called on cookie-restore path (the
-interstitial is post-login only).
+**`sites/wowgirls_platform.py` — WowgirlsPlatformSite**
 
----
+Dedicated scraper for the WowGirls updates listing. It shares the authenticated
+browser/session behavior with the Venus platform sites but has its own listing
+selectors.
+
+**`sites/manyvids.py` — ManyVidsSite**
+
+Anonymous public creator-store scraper. A single `manyvids` site config contains
+one or more creators. The scraper handles regular and mobile store pagination,
+early-stop behavior against known titles, retry/backoff for blocked or failed
+creator scrapes, per-video detail-page tag extraction, and metadata enrichment
+for creator, type, duration, and price. It overrides `requires_auth`,
+`context_options()`, and `init_scripts()` to run without stored credentials and
+with ManyVids-specific browser context settings.
 
 ## Data Model
 
@@ -211,6 +236,10 @@ CREATE TABLE seen_items (
     thumbnail_url TEXT,
     performers TEXT,                 -- JSON array
     tags TEXT,                       -- JSON array
+    duration TEXT,
+    price TEXT,
+    video_type TEXT,
+    creator TEXT,
     first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     notified_at TIMESTAMP,
     PRIMARY KEY (site_name, item_id)
@@ -242,17 +271,39 @@ class Item(BaseModel):
     thumbnail_url: HttpUrl | None = None
     performers: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    duration: str | None = None
+    price: str | None = None
+    video_type: str | None = None
+    creator: str | None = None
+
+class ManyVidsCreator(BaseModel):
+    creator_id: str
+    creator_name: str
+    display_name: str | None = None
+
+class ManyVidsScrapingConfig(BaseModel):
+    delay_between_creators_min: float = 30
+    delay_between_creators_max: float = 60
+    delay_between_pages_min: float = 3
+    delay_between_pages_max: float = 8
+    page_timeout: int = 30000
+    max_retries: int = 3
+    retry_backoff_base: float = 10
+    user_agent: str = "Mozilla/5.0 (...)"
 
 class SiteConfig(BaseModel):
     name: str
-    type: Literal["venus_platform", "vixen_media_group_platform"]
+    display_name: str | None = None
+    type: Literal["venus_platform", "wowgirls_platform", "manyvids"]
     base_url: HttpUrl
-    login_url: HttpUrl
-    probe_url: HttpUrl
-    listing_url: HttpUrl
+    login_url: HttpUrl | None = None
+    probe_url: HttpUrl | None = None
+    listing_url: HttpUrl | None = None
     interval_hours: float = 6.0
-    credentials_env_user: str
-    credentials_env_pass: str
+    credentials_env_user: str | None = None
+    credentials_env_pass: str | None = None
+    enabled: bool = True
+    creators: list[ManyVidsCreator] = Field(default_factory=list)
 
 class AppConfig(BaseModel):
     sites: list[SiteConfig]
@@ -262,6 +313,7 @@ class AppConfig(BaseModel):
     log_level: str = "INFO"
     headless: bool = True
     user_agent: str | None = None
+    manyvids: ManyVidsScrapingConfig | None = None
 ```
 
 ---
@@ -271,72 +323,56 @@ class AppConfig(BaseModel):
 ### `config/config.example.yaml`
 
 ```yaml
+db_path: /data/monitor.db
+discord_webhook_env: https://discord.com/api/webhooks/REPLACE_ME
+headless: true
+log_level: INFO
+sessions_dir: /data/sessions
+
 sites:
-  - name: tushy
-    type: vixen_media_group_platform
-    base_url: https://members.tushy.com
-    login_url: https://members.tushy.com/login
-    probe_url: https://members.tushy.com/videos
-    listing_url: https://members.tushy.com/videos
+  - base_url: https://venus.sensual.love
+    credentials_env_pass: CHANGE_ME_PASS
+    credentials_env_user: CHANGE_ME_USER
+    display_name: sensual.love
+    enabled: true
     interval_hours: 6
-    credentials_env_user: TUSHY_USER
-    credentials_env_pass: TUSHY_PASS
-
-  - name: deeper
-    type: vixen_media_group_platform
-    base_url: https://members.deeper.com
-    login_url: https://members.deeper.com/login
-    probe_url: https://members.deeper.com/videos
-    listing_url: https://members.deeper.com/videos
-    interval_hours: 6
-    credentials_env_user: DEEPER_USER
-    credentials_env_pass: DEEPER_PASS
-
-  - name: sensual_love
-    type: venus_platform
-    base_url: https://venus.sensual.love
+    listing_url: https://venus.sensual.love/members/content
     login_url: https://venus.sensual.love/login
-    probe_url: https://venus.sensual.love/account
-    listing_url: https://venus.sensual.love/videos
-    interval_hours: 6
-    credentials_env_user: SENSUAL_USER
-    credentials_env_pass: SENSUAL_PASS
+    name: sensual_love
+    probe_url: https://venus.sensual.love/members/content
+    type: venus_platform
 
   - name: wowgirls
-    type: venus_platform
+    display_name: wowgirls.com
+    type: wowgirls_platform
     base_url: https://venus.wowgirls.com
     login_url: https://venus.wowgirls.com/login
-    probe_url: https://venus.wowgirls.com/account
-    listing_url: https://venus.wowgirls.com/videos
+    probe_url: https://venus.wowgirls.com/updates/
+    listing_url: https://venus.wowgirls.com/updates/
     interval_hours: 6
-    credentials_env_user: WOWGIRLS_USER
-    credentials_env_pass: WOWGIRLS_PASS
+    credentials_env_user: CHANGE_ME_USER
+    credentials_env_pass: CHANGE_ME_PASS
 
-  - name: ultrafilms
-    type: venus_platform
-    base_url: https://venus.ultrafilms.com
-    login_url: https://venus.ultrafilms.com/login
-    probe_url: https://venus.ultrafilms.com/account
-    listing_url: https://venus.ultrafilms.com/videos
-    interval_hours: 6
-    credentials_env_user: ULTRAFILMS_USER
-    credentials_env_pass: ULTRAFILMS_PASS
+  - name: manyvids
+    display_name: ManyVids
+    type: manyvids
+    base_url: https://www.manyvids.com
+    interval_hours: 24
+    enabled: true
+    creators:
+      - creator_id: "1002990973"
+        creator_name: karneli_bandi
+        display_name: Karneli Bandi
 
-  - name: angels_love
-    type: venus_platform
-    base_url: https://venus.angels.love
-    login_url: https://venus.angels.love/login
-    probe_url: https://venus.angels.love/account
-    listing_url: https://venus.angels.love/videos
-    interval_hours: 6
-    credentials_env_user: ANGELS_USER
-    credentials_env_pass: ANGELS_PASS
-
-discord_webhook_env: DISCORD_WEBHOOK_URL
-db_path: /data/monitor.db
-sessions_dir: /data/sessions
-log_level: INFO
-headless: true
+manyvids:
+  delay_between_creators_min: 30
+  delay_between_creators_max: 60
+  delay_between_pages_min: 3
+  delay_between_pages_max: 8
+  page_timeout: 30000
+  max_retries: 3
+  retry_backoff_base: 10
+  user_agent: Mozilla/5.0 (...)
 ```
 
 ### Environment Variables
@@ -345,7 +381,7 @@ headless: true
 |---------------------------|--------------------------|------------------------------------------|
 | `CONFIG_PATH`             | `/config/config.yaml`    | Path to config file                      |
 | `DISCORD_WEBHOOK_URL`     | (required)               | Discord webhook                          |
-| `<SITE>_USER` / `_PASS`   | (required per site)      | Credentials per `credentials_env_*`      |
+| `<SITE>_USER` / `_PASS`   | required per authenticated site | Credentials per `credentials_env_*` |
 | `RUN_ONCE`                | unset                    | Set `1` to run one cycle and exit        |
 | `DRY_RUN`                 | unset                    | Skip DB writes + notifications           |
 | `LOG_LEVEL`               | `INFO`                   | Override log level                       |
@@ -360,13 +396,15 @@ headless: true
 1. Acquire per-site asyncio lock (prevents overlapping runs)
 2. Open browser context for site
 3. ensure_authenticated(site, page):
-     a. Navigate to probe_url
-     b. If logged in -> goto step 4
-     c. Else: site.login(page)
-     d. site.dismiss_interstitial(page) (no-op for venus.*)
-     e. Re-probe; raise on failure
-     f. Persist storage state
-4. Navigate to listing_url
+     a. Create context with site.context_options() and init_scripts()
+     b. If requires_auth is false, return anonymous context
+     c. Navigate to probe_url
+     d. If logged in -> goto step 4
+     e. Else: site.login(page)
+     f. site.dismiss_interstitial(page) (no-op for most sites)
+     g. Re-probe; raise on failure
+     h. Persist storage state
+4. Navigate to listing_url when configured
 5. items = site.get_latest_items(page) (videos only)
 6. For each item:
      a. INSERT OR IGNORE into seen_items
@@ -411,33 +449,9 @@ sometimes mix content into video listings via "recommended for you" widgets);
 the per-item check alone is fragile (selectors change). Together they're
 robust.
 
----
-
-## Intermittent interstitial handling (Deeper / Tushy)
-
-Confirmed: the interstitial only appears immediately post-login, never
-mid-session and never after a cookie restore.
-
-```python
-async def dismiss_interstitial(self, page: Page) -> bool:
-    try:
-        btn = await page.wait_for_selector(
-            'a:text("Continue"), button:text("Continue")',
-            timeout=5000,
-        )
-        if btn is None:
-            return False
-        await btn.click()
-        await page.wait_for_load_state("networkidle", timeout=15000)
-        return True
-    except PlaywrightTimeoutError:
-        return False
-```
-
-Called exactly once, immediately after `login()` returns successfully. Not
-called after cookie restore (since the interstitial is post-login only).
-A short 5-second timeout means missing interstitials add at most 5 seconds
-per re-auth, which happens at most a few times per site per day.
+ManyVids creator stores are public, but still use video-store URLs and
+regular/mobile video payload extraction so photos and non-video products are not
+emitted as notification items.
 
 ---
 
@@ -582,8 +596,9 @@ services:
 | `browser.py`                    | `tests/test_browser.py`                | `AsyncMock` for Playwright objects     |
 | `main.py`                       | `tests/test_main.py`                   | Mocked scheduler, mocked sites         |
 | `sites/base.py`                 | `tests/sites/test_base.py`             | Concrete test subclass                 |
+| `sites/manyvids.py`             | `tests/sites/test_manyvids.py`         | HTML fixtures + AsyncMock pages        |
 | `sites/venus_platform.py`       | `tests/sites/test_venus_platform.py`   | HTML fixtures + AsyncMock pages        |
-| `sites/vixen_media_group_platform.py` | `tests/sites/test_vixen_media_group_platform.py` | HTML fixtures + interstitial scenarios |
+| `sites/wowgirls_platform.py`    | `tests/sites/test_wowgirls_platform.py` | HTML fixtures                        |
 
 ### Key test cases
 
@@ -591,10 +606,13 @@ services:
 - `seen_items` insert-and-detect-new flow
 - Duplicate insert returns "not new"
 - `failed_notifications` insert/increment/cap-at-10
+- Metadata columns for duration, price, video type, and creator round-trip
 - Schema migration is idempotent
 
 **`test_discord.py`**
 - Embed structure matches expected JSON shape
+- Creator/type/duration/price fields render when present and are omitted when
+  absent
 - 429 response triggers retry with backoff
 - Network error returns failure (caller logs)
 - Webhook URL missing raises clear error
@@ -602,19 +620,24 @@ services:
 **`test_browser.py`**
 - `ensure_authenticated`: probe says logged in → skips login
 - `ensure_authenticated`: probe says not logged in → calls login, dismisses interstitial
+- `ensure_authenticated`: anonymous site skips probe/login and receives context
+  options/init scripts
 - Cookie restore path: never calls `dismiss_interstitial`
 - Storage state persisted after successful auth
-
-**`test_vixen_media_group_platform.py`**
-- Interstitial present: clicked, returns True
-- Interstitial absent: returns False after timeout (no error)
-- Interstitial click fails: returns False, logs warning, no exception
 
 **`test_venus_platform.py`**
 - Listing with only videos → all returned
 - Listing with mixed video + photo cards → only videos returned
 - Listing empty → returns empty list
 - Title/thumbnail/performers/tags extracted correctly
+
+**`test_manyvids.py`**
+- RSC payload extraction for regular/mobile store pages
+- DOM enrichment of video type and thumbnails
+- Detail-page tag extraction strips leading `#`
+- Early-stop behavior when all page titles are already known
+- Retry/backoff behavior for blocked or failed creator scrapes
+- Anonymous `BaseSite` hooks and item metadata mapping
 
 **`test_main.py`**
 - `RUN_ONCE=1` runs each site once and exits

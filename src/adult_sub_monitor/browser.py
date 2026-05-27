@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from playwright.async_api import Browser, BrowserContext, Playwright, async_playwright
 
@@ -47,28 +47,35 @@ class BrowserManager:
         if self._browser is None:
             raise RuntimeError("BrowserManager.start() must be called before use")
 
+        context_options: dict[str, Any] = dict(site.context_options())
+        if self.user_agent is not None:
+            context_options = {**context_options, "user_agent": self.user_agent}
+
+        if not site.requires_auth:
+            context = await self._browser.new_context(**context_options)
+            for script in site.init_scripts():
+                await context.add_init_script(script)
+            return context
+
         storage_state_path = self.sessions_dir / f"{site.name}.json"
         has_state = storage_state_path.exists()
+        if has_state:
+            context_options = {
+                **context_options,
+                "storage_state": str(storage_state_path),
+            }
 
-        if has_state and self.user_agent is not None:
-            context = await self._browser.new_context(
-                storage_state=str(storage_state_path),
-                user_agent=self.user_agent,
-            )
-        elif has_state:
-            context = await self._browser.new_context(
-                storage_state=str(storage_state_path),
-            )
-        elif self.user_agent is not None:
-            context = await self._browser.new_context(user_agent=self.user_agent)
-        else:
-            context = await self._browser.new_context()
+        context = await self._browser.new_context(**context_options)
+        for script in site.init_scripts():
+            await context.add_init_script(script)
         page = await context.new_page()
 
         await page.goto(site.probe_url)
         if not await site.is_logged_in(page):
             env_user = site_config.credentials_env_user
             env_pass = site_config.credentials_env_pass
+            if env_user is None or env_pass is None:
+                raise RuntimeError(f"Credentials are not configured for {site.name}")
             username = os.environ.get(env_user, env_user)
             password = os.environ.get(env_pass, env_pass)
             await site.login(page, username, password)

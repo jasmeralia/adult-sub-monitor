@@ -10,6 +10,9 @@ def _site(is_logged_in: AsyncMock) -> AsyncMock:
     site = AsyncMock()
     site.name = "example"
     site.probe_url = "https://example.test/account"
+    site.requires_auth = True
+    site.context_options = MagicMock(return_value={})
+    site.init_scripts = MagicMock(return_value=[])
     site.is_logged_in = is_logged_in
     site.login = AsyncMock()
     site.dismiss_interstitial = AsyncMock()
@@ -167,6 +170,87 @@ async def test_ensure_authenticated_user_agent_without_storage_state(
     site.login.assert_not_called()
     site.dismiss_interstitial.assert_not_called()
     mock_context.storage_state.assert_awaited_once_with(path=str(storage_state_path))
+
+
+@pytest.mark.asyncio
+async def test_ensure_authenticated_forwards_context_options(
+    mocker, tmp_path, mock_page
+) -> None:
+    site = _site(AsyncMock(return_value=True))
+    site.context_options.return_value = {"locale": "en-US"}
+    site_config = _site_config()
+    storage_state_path = tmp_path / f"{site.name}.json"
+    mock_context = AsyncMock()
+    manager, mock_browser = await _started_manager(
+        mocker,
+        tmp_path,
+        mock_context,
+        mock_page,
+        user_agent="MonitorBot/1.0",
+    )
+
+    await manager.ensure_authenticated(site, site_config)
+
+    mock_browser.new_context.assert_awaited_once_with(
+        locale="en-US",
+        user_agent="MonitorBot/1.0",
+    )
+    mock_context.storage_state.assert_awaited_once_with(path=str(storage_state_path))
+
+
+@pytest.mark.asyncio
+async def test_ensure_authenticated_anonymous_site_skips_auth_flow(
+    mocker, tmp_path, mock_page
+) -> None:
+    site = _site(AsyncMock(return_value=False))
+    site.requires_auth = False
+    site.context_options.return_value = {"locale": "en-US"}
+    site_config = _site_config()
+    storage_state_path = tmp_path / f"{site.name}.json"
+    mock_context = AsyncMock()
+    manager, mock_browser = await _started_manager(
+        mocker,
+        tmp_path,
+        mock_context,
+        mock_page,
+        user_agent="MonitorBot/1.0",
+    )
+
+    context = await manager.ensure_authenticated(site, site_config)
+
+    assert context is mock_context
+    mock_browser.new_context.assert_awaited_once_with(
+        locale="en-US",
+        user_agent="MonitorBot/1.0",
+    )
+    mock_context.new_page.assert_not_called()
+    mock_page.goto.assert_not_called()
+    site.is_logged_in.assert_not_called()
+    site.login.assert_not_called()
+    site.dismiss_interstitial.assert_not_called()
+    mock_context.storage_state.assert_not_called()
+    assert not storage_state_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_ensure_authenticated_adds_site_init_scripts(
+    mocker, tmp_path, mock_page
+) -> None:
+    site = _site(AsyncMock(return_value=False))
+    site.requires_auth = False
+    site.init_scripts.return_value = ["window.__monitor = true;"]
+    site_config = _site_config()
+    mock_context = AsyncMock()
+    manager, _mock_browser = await _started_manager(
+        mocker,
+        tmp_path,
+        mock_context,
+        mock_page,
+    )
+
+    await manager.ensure_authenticated(site, site_config)
+
+    mock_context.add_init_script.assert_awaited_once_with("window.__monitor = true;")
 
 
 @pytest.mark.asyncio

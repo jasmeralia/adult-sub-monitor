@@ -28,6 +28,10 @@ class Database:
                 thumbnail_url TEXT,
                 performers TEXT,
                 tags TEXT,
+                duration TEXT,
+                price TEXT,
+                video_type TEXT,
+                creator TEXT,
                 first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 notified_at TIMESTAMP,
                 PRIMARY KEY (site_name, item_id)
@@ -51,7 +55,27 @@ class Database:
                 ON failed_notifications (last_attempted_at);
             """
         )
+        self._ensure_seen_item_metadata_columns()
         self.conn.commit()
+
+    def _ensure_seen_item_metadata_columns(self) -> None:
+        existing_columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(seen_items)")
+        }
+        metadata_columns = {
+            "duration": "TEXT",
+            "price": "TEXT",
+            "video_type": "TEXT",
+            "creator": "TEXT",
+        }
+
+        for column_name, column_type in metadata_columns.items():
+            if column_name not in existing_columns:
+                self.conn.execute(
+                    f"ALTER TABLE seen_items ADD COLUMN {column_name} {column_type}"
+                )
+
+        self.conn.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)")
 
     async def mark_seen(self, item: Item) -> bool:
         cursor = self.conn.execute(
@@ -63,9 +87,13 @@ class Database:
                 url,
                 thumbnail_url,
                 performers,
-                tags
+                tags,
+                duration,
+                price,
+                video_type,
+                creator
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 item.site_name,
@@ -75,6 +103,10 @@ class Database:
                 str(item.thumbnail_url) if item.thumbnail_url is not None else None,
                 json.dumps(item.performers),
                 json.dumps(item.tags),
+                item.duration,
+                item.price,
+                item.video_type,
+                item.creator,
             ),
         )
         self.conn.commit()
@@ -116,7 +148,11 @@ class Database:
                 seen_items.url,
                 seen_items.thumbnail_url,
                 seen_items.performers,
-                seen_items.tags
+                seen_items.tags,
+                seen_items.duration,
+                seen_items.price,
+                seen_items.video_type,
+                seen_items.creator
             FROM failed_notifications
             JOIN seen_items
                 ON seen_items.site_name = failed_notifications.site_name
@@ -138,9 +174,24 @@ class Database:
                 thumbnail_url=row[4],
                 performers=json.loads(row[5] or "[]"),
                 tags=json.loads(row[6] or "[]"),
+                duration=row[7],
+                price=row[8],
+                video_type=row[9],
+                creator=row[10],
             )
             for row in cursor.fetchall()
         ]
+
+    async def get_known_titles(self, site_name: str) -> set[str]:
+        cursor = self.conn.execute(
+            """
+            SELECT title
+            FROM seen_items
+            WHERE site_name = ?
+            """,
+            (site_name,),
+        )
+        return {row[0] for row in cursor.fetchall()}
 
     async def mark_notified(self, item: Item) -> None:
         self.conn.execute(

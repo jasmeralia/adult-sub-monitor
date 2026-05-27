@@ -1,9 +1,13 @@
+from typing import TYPE_CHECKING
 from urllib.parse import urljoin
 
 from playwright.async_api import Locator, Page
 
 from adult_sub_monitor.models import Item, SiteConfig
 from adult_sub_monitor.sites.base import BaseSite
+
+if TYPE_CHECKING:
+    from adult_sub_monitor.db import Database
 
 LOGIN_EMAIL_SELECTOR = "#inputEmail"
 LOGIN_PASSWORD_SELECTOR = "#inputPassword"
@@ -37,7 +41,10 @@ class VenusPlatformSite(BaseSite):
     async def is_logged_in(self, page: Page) -> bool:
         return "/login" not in page.url
 
-    async def get_latest_items(self, page: Page) -> list[Item]:
+    async def get_latest_items(
+        self, page: Page, db: "Database | None" = None
+    ) -> list[Item]:
+        del db
         partials = await self._scrape_listing(page)
         items = []
         for item_url, title, thumbnail_src, performers in partials:
