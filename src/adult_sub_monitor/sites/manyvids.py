@@ -232,6 +232,7 @@ class ManyVidsSite(BaseSite):
 
     def context_options(self) -> dict[str, object]:
         return {
+            "user_agent": self.scraping.user_agent,
             "viewport": {"width": 1920, "height": 1080},
             "locale": "en-US",
             "timezone_id": "America/New_York",
