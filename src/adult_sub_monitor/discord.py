@@ -28,7 +28,7 @@ def _build_embed(item: Item) -> dict[str, object]:
     }
 
     if item.thumbnail_url:
-        embed["thumbnail"] = {"url": str(item.thumbnail_url)}
+        embed["image"] = {"url": str(item.thumbnail_url)}
 
     fields: list[dict[str, object]] = []
     performers = ", ".join(item.performers)
