@@ -14,10 +14,19 @@ def _truncate_field(value: str) -> str:
     return value[:1024]
 
 
+def _build_title(item: Item) -> str:
+    raw_title = item.title.strip() or "Untitled video"
+    if item.creator:
+        base = f"New {item.site_name} Video from {item.creator}: {raw_title}"
+        if item.video_type:
+            base = f"{base} ({item.video_type.title()})"
+        return base
+    return f"New {item.site_name} Video: {raw_title}"
+
+
 def _build_embed(item: Item) -> dict[str, object]:
-    title = item.title.strip() or "Untitled video"
     embed: dict[str, object] = {
-        "title": title,
+        "title": _build_title(item),
         "url": str(item.url),
         "fields": [],
         "footer": {
@@ -51,24 +60,6 @@ def _build_embed(item: Item) -> dict[str, object]:
             }
         )
 
-    if item.creator:
-        fields.append(
-            {
-                "name": "Creator",
-                "value": _truncate_field(item.creator),
-                "inline": True,
-            }
-        )
-
-    if item.video_type:
-        fields.append(
-            {
-                "name": "Type",
-                "value": _truncate_field(item.video_type.title()),
-                "inline": True,
-            }
-        )
-
     if item.duration:
         fields.append(
             {
@@ -78,7 +69,7 @@ def _build_embed(item: Item) -> dict[str, object]:
             }
         )
 
-    if item.price is not None or item.creator or item.video_type or item.duration:
+    if item.creator or item.price is not None or item.duration:
         price = item.price.strip() if item.price is not None else ""
         fields.append(
             {
