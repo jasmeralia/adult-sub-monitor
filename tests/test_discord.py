@@ -57,7 +57,8 @@ async def test_embed_structure() -> None:
     embed = cast(dict[str, Any], captured_payload["embeds"][0])
     assert embed["title"] == "Test Video"
     assert embed["url"] == "https://example.com/videos/item-1"
-    assert embed["thumbnail"] == {"url": "https://example.com/thumbs/item-1.jpg"}
+    assert embed["image"] == {"url": "https://example.com/thumbs/item-1.jpg"}
+    assert "thumbnail" not in embed
 
 
 @pytest.mark.asyncio
