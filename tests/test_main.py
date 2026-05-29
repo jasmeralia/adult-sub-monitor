@@ -51,7 +51,7 @@ def test_build_site_unknown_type_raises() -> None:
     site_config = cast(SiteConfig, SimpleNamespace(type="unknown", name="bad-site"))
 
     with pytest.raises(ValueError, match="Unsupported site type: unknown"):
-        _build_site(site_config, build_config([]))
+        _build_site(site_config)
 
 
 def test_build_site_known_types() -> None:
@@ -66,23 +66,91 @@ def test_build_site_known_types() -> None:
         credentials_env_user="WOWGIRLS_USERNAME",
         credentials_env_pass="WOWGIRLS_PASSWORD",
     )
+
+    assert _build_site(venus_config).name == "test_site"
+    assert _build_site(wowgirls_config).name == "wowgirls-test"
+
+
+def test_build_site_rejects_manyvids_directly() -> None:
     manyvids_config = SiteConfig(
         name="manyvids-test",
         display_name="ManyVids",
         type="manyvids",
         base_url="https://www.manyvids.com",
         creators=[
-            ManyVidsCreator(
-                creator_id="1002990973",
-                creator_name="creator_slug",
-            )
+            ManyVidsCreator(creator_id="1002990973", creator_name="creator_slug"),
         ],
     )
-    app_config = build_config([venus_config, wowgirls_config, manyvids_config])
 
-    assert _build_site(venus_config, app_config).name == "test_site"
-    assert _build_site(wowgirls_config, app_config).name == "wowgirls-test"
-    assert _build_site(manyvids_config, app_config).name == "manyvids-test"
+    with pytest.raises(ValueError, match="per-creator"):
+        _build_site(manyvids_config)
+
+
+def test_expand_manyvids_sites_one_per_creator() -> None:
+    from adult_sub_monitor.main import _expand_manyvids_sites
+    from adult_sub_monitor.models import ManyVidsScrapingConfig
+    from adult_sub_monitor.sites.manyvids import ManyVidsSite
+
+    manyvids_config = SiteConfig(
+        name="manyvids",
+        display_name="ManyVids",
+        type="manyvids",
+        base_url="https://www.manyvids.com",
+        interval_hours=99,
+        creators=[
+            ManyVidsCreator(creator_id="1", creator_name="alice"),
+            ManyVidsCreator(creator_id="2", creator_name="bob"),
+            ManyVidsCreator(creator_id="3", creator_name="carol"),
+        ],
+    )
+    app_config = build_config([manyvids_config])
+    app_config = app_config.model_copy(
+        update={
+            "manyvids": ManyVidsScrapingConfig(
+                creator_interval_hours=12,
+                creator_jitter_seconds=21600,
+            )
+        }
+    )
+
+    expanded = _expand_manyvids_sites(manyvids_config, app_config)
+
+    assert [synth.name for synth, _ in expanded] == [
+        "manyvids:alice",
+        "manyvids:bob",
+        "manyvids:carol",
+    ]
+    for synth, site in expanded:
+        assert synth.interval_hours == 12
+        assert synth.jitter_seconds == 21600
+        assert synth.display_name == "ManyVids"
+        assert isinstance(site, ManyVidsSite)
+        assert site.creator.creator_name in {"alice", "bob", "carol"}
+
+
+def test_build_active_sites_mixes_venus_and_per_creator_manyvids() -> None:
+    from adult_sub_monitor.main import _build_active_sites
+
+    venus_config = build_site_config("venus_site")
+    manyvids_config = SiteConfig(
+        name="manyvids",
+        display_name="ManyVids",
+        type="manyvids",
+        base_url="https://www.manyvids.com",
+        creators=[
+            ManyVidsCreator(creator_id="1", creator_name="alice"),
+            ManyVidsCreator(creator_id="2", creator_name="bob"),
+        ],
+    )
+    config = build_config([venus_config, manyvids_config])
+
+    active = _build_active_sites(config)
+
+    assert [sc.name for sc, _ in active] == [
+        "venus_site",
+        "manyvids:alice",
+        "manyvids:bob",
+    ]
 
 
 @pytest.mark.asyncio
@@ -120,8 +188,13 @@ async def test_run_once_skips_disabled_sites(mocker, monkeypatch) -> None:
     assert check_site.await_args_list[0].args[0].name == "enabled_site"
 
 
-def test_scheduler_jitter_seconds_is_fixed_range() -> None:
-    assert _scheduler_jitter_seconds() == 900
+def test_scheduler_jitter_seconds_uses_default_when_unset() -> None:
+    assert _scheduler_jitter_seconds(build_site_config()) == 900
+
+
+def test_scheduler_jitter_seconds_honors_per_site_override() -> None:
+    overridden = build_site_config().model_copy(update={"jitter_seconds": 21600})
+    assert _scheduler_jitter_seconds(overridden) == 21600
 
 
 @pytest.mark.asyncio

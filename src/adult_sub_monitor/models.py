@@ -36,6 +36,8 @@ class ManyVidsScrapingConfig(BaseModel):
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     )
+    creator_interval_hours: float = 12.0
+    creator_jitter_seconds: int = 21600
 
 
 class SiteConfig(BaseModel):
@@ -52,6 +54,7 @@ class SiteConfig(BaseModel):
     enabled: bool = True
     notifications_enabled: bool = True
     discord_webhook: str | None = None
+    jitter_seconds: int | None = None
     creators: list[ManyVidsCreator] = Field(default_factory=list)
 
     @model_validator(mode="after")

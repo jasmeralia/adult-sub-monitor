@@ -241,12 +241,15 @@ class ManyVidsSite(BaseSite):
     requires_auth = False
 
     def __init__(
-        self, site_config: SiteConfig, scraping: ManyVidsScrapingConfig
+        self,
+        site_config: SiteConfig,
+        scraping: ManyVidsScrapingConfig,
+        creator: ManyVidsCreator,
     ) -> None:
         self.name = site_config.name
         self.display_name = site_config.display_name or site_config.name
         self.base_url = str(site_config.base_url)
-        self.creators = site_config.creators
+        self.creator = creator
         self.scraping = scraping
 
     def context_options(self) -> dict[str, object]:
@@ -265,43 +268,35 @@ class ManyVidsSite(BaseSite):
     ) -> list[Item]:
         known_titles = await db.get_known_titles(self.display_name) if db else set()
         items: list[Item] = []
-        for index, creator in enumerate(self.creators):
-            if index:
-                await asyncio.sleep(
-                    random.uniform(
-                        self.scraping.delay_between_creators_min,
-                        self.scraping.delay_between_creators_max,
-                    )
-                )
+        creator = self.creator
+        result = await self.scrape_creator_with_retry(page, creator, known_titles)
+        if result.error:
+            logger.error(
+                "Creator %s failed during scrape: %s",
+                creator.creator_name,
+                result.error,
+            )
+            return items
 
-            result = await self.scrape_creator_with_retry(page, creator, known_titles)
-            if result.error:
-                logger.error(
-                    "Creator %s failed during scrape: %s",
-                    creator.creator_name,
-                    result.error,
-                )
+        creator_name = creator.display_name or creator.creator_name
+        for video in result.videos:
+            if video.title in known_titles:
                 continue
-
-            creator_name = creator.display_name or creator.creator_name
-            for video in result.videos:
-                if video.title in known_titles:
-                    continue
-                tags = await self._fetch_tags(page, video.url)
-                items.append(
-                    Item(
-                        site_name=self.display_name,
-                        item_id=video.url,
-                        title=video.title,
-                        url=video.url,
-                        thumbnail_url=video.thumbnail_url,
-                        tags=tags,
-                        duration=video.duration,
-                        price=video.price_regular,
-                        video_type=video.video_type,
-                        creator=creator_name,
-                    )
+            tags = await self._fetch_tags(page, video.url)
+            items.append(
+                Item(
+                    site_name=self.display_name,
+                    item_id=video.url,
+                    title=video.title,
+                    url=video.url,
+                    thumbnail_url=video.thumbnail_url,
+                    tags=tags,
+                    duration=video.duration,
+                    price=video.price_regular,
+                    video_type=video.video_type,
+                    creator=creator_name,
                 )
+            )
 
         return items
 
