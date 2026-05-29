@@ -112,16 +112,16 @@ async def test_fetch_tags_parses_fixture_and_normalizes() -> None:
     )
     page.locator.assert_called_once_with(TAGS_SELECTOR)
     assert tags == [
-        "AlternativeGirl",
-        "BigDicks",
+        "Alternative Girl",
+        "Big Dicks",
         "Cowgirl",
         "Cumshots",
         "Doggystyle",
         "POV",
-        "POVBlowjob",
-        "POVSex",
+        "POV Blowjob",
+        "POV Sex",
         "Redhead",
-        "SmallTits",
+        "Small Tits",
     ]
 
 
