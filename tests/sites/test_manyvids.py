@@ -118,8 +118,8 @@ async def test_fetch_tags_parses_fixture_and_normalizes() -> None:
         "Cumshots",
         "Doggystyle",
         "POV",
-        "POVBlowjob",
-        "POVSex",
+        "POV Blowjob",
+        "POV Sex",
         "Redhead",
         "Small Tits",
     ]

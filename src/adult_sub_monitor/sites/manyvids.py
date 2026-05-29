@@ -135,13 +135,15 @@ class _TagHTMLParser(HTMLParser):
 
 
 _CAMEL_BOUNDARY = re.compile(r"([a-z])([A-Z])")
+_ACRONYM_BOUNDARY = re.compile(r"([A-Z]+)([A-Z][a-z])")
 
 
 def _normalize_tag(text: str) -> str | None:
     normalized = text.strip().lstrip("#").strip()
     if not normalized:
         return None
-    return _CAMEL_BOUNDARY.sub(r"\1 \2", normalized)
+    normalized = _CAMEL_BOUNDARY.sub(r"\1 \2", normalized)
+    return _ACRONYM_BOUNDARY.sub(r"\1 \2", normalized)
 
 
 def _build_page_url(
