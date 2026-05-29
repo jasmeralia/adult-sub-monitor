@@ -52,14 +52,17 @@ def _make_creator_site_config(
     creator: ManyVidsCreator,
     scraping: ManyVidsScrapingConfig,
 ) -> SiteConfig:
-    return parent.model_copy(
-        update={
-            "name": f"{parent.name}:{creator.creator_name}",
-            "interval_hours": scraping.creator_interval_hours,
-            "jitter_seconds": scraping.creator_jitter_seconds,
-            "creators": [creator],
-        }
-    )
+    updates: dict[str, object] = {
+        "name": f"{parent.name}:{creator.creator_name}",
+        "interval_hours": scraping.creator_interval_hours,
+        "jitter_seconds": scraping.creator_jitter_seconds,
+        "creators": [creator],
+    }
+    if creator.notifications_enabled is not None:
+        updates["notifications_enabled"] = creator.notifications_enabled
+    if creator.discord_webhook is not None:
+        updates["discord_webhook"] = creator.discord_webhook
+    return parent.model_copy(update=updates)
 
 
 def _expand_manyvids_sites(

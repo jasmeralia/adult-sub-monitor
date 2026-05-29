@@ -22,6 +22,8 @@ class ManyVidsCreator(BaseModel):
     creator_id: str
     creator_name: str
     display_name: str | None = None
+    notifications_enabled: bool | None = None  # None = inherit from SiteConfig
+    discord_webhook: str | None = None  # None = inherit from SiteConfig
 
 
 class ManyVidsScrapingConfig(BaseModel):

@@ -71,6 +71,80 @@ def test_build_site_known_types() -> None:
     assert _build_site(wowgirls_config).name == "wowgirls-test"
 
 
+def test_make_creator_site_config_inherits_notifications_when_none() -> None:
+    from adult_sub_monitor.main import _make_creator_site_config
+    from adult_sub_monitor.models import ManyVidsScrapingConfig
+
+    parent = SiteConfig(
+        name="manyvids",
+        type="manyvids",
+        base_url="https://www.manyvids.com",
+        notifications_enabled=False,
+    )
+    creator = ManyVidsCreator(
+        creator_id="1", creator_name="alice", notifications_enabled=None
+    )
+    synth = _make_creator_site_config(parent, creator, ManyVidsScrapingConfig())
+
+    assert synth.notifications_enabled is False
+
+
+def test_make_creator_site_config_creator_override_wins() -> None:
+    from adult_sub_monitor.main import _make_creator_site_config
+    from adult_sub_monitor.models import ManyVidsScrapingConfig
+
+    parent = SiteConfig(
+        name="manyvids",
+        type="manyvids",
+        base_url="https://www.manyvids.com",
+        notifications_enabled=True,
+    )
+    creator = ManyVidsCreator(
+        creator_id="2", creator_name="bob", notifications_enabled=False
+    )
+    synth = _make_creator_site_config(parent, creator, ManyVidsScrapingConfig())
+
+    assert synth.notifications_enabled is False
+
+
+def test_make_creator_site_config_webhook_inherits_when_none() -> None:
+    from adult_sub_monitor.main import _make_creator_site_config
+    from adult_sub_monitor.models import ManyVidsScrapingConfig
+
+    parent = SiteConfig(
+        name="manyvids",
+        type="manyvids",
+        base_url="https://www.manyvids.com",
+        discord_webhook="https://discord.example/global",
+    )
+    creator = ManyVidsCreator(
+        creator_id="3", creator_name="carol", discord_webhook=None
+    )
+    synth = _make_creator_site_config(parent, creator, ManyVidsScrapingConfig())
+
+    assert synth.discord_webhook == "https://discord.example/global"
+
+
+def test_make_creator_site_config_webhook_override_wins() -> None:
+    from adult_sub_monitor.main import _make_creator_site_config
+    from adult_sub_monitor.models import ManyVidsScrapingConfig
+
+    parent = SiteConfig(
+        name="manyvids",
+        type="manyvids",
+        base_url="https://www.manyvids.com",
+        discord_webhook="https://discord.example/global",
+    )
+    creator = ManyVidsCreator(
+        creator_id="4",
+        creator_name="diana",
+        discord_webhook="https://discord.example/creator-specific",
+    )
+    synth = _make_creator_site_config(parent, creator, ManyVidsScrapingConfig())
+
+    assert synth.discord_webhook == "https://discord.example/creator-specific"
+
+
 def test_build_site_rejects_manyvids_directly() -> None:
     manyvids_config = SiteConfig(
         name="manyvids-test",
