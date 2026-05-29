@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import random
 import signal
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -15,7 +14,13 @@ from adult_sub_monitor.browser import BrowserManager
 from adult_sub_monitor.config import load_config
 from adult_sub_monitor.db import Database
 from adult_sub_monitor.discord import send_video_notification
-from adult_sub_monitor.models import AppConfig, Item, ManyVidsScrapingConfig, SiteConfig
+from adult_sub_monitor.models import (
+    AppConfig,
+    Item,
+    ManyVidsCreator,
+    ManyVidsScrapingConfig,
+    SiteConfig,
+)
 from adult_sub_monitor.sites.base import BaseSite
 from adult_sub_monitor.sites.manyvids import ManyVidsSite
 from adult_sub_monitor.sites.venus_platform import VenusPlatformSite
@@ -25,22 +30,68 @@ logger = logging.getLogger(__name__)
 _site_locks: dict[str, asyncio.Lock] = {}
 
 
-def _build_site(site_config: SiteConfig, app_config: AppConfig) -> BaseSite:
+_DEFAULT_JITTER_SECONDS = 900
+
+
+def _build_site(site_config: SiteConfig) -> BaseSite:
     if site_config.type == "venus_platform":
         return VenusPlatformSite(site_config)
     if site_config.type == "wowgirls_platform":
         return WowgirlsPlatformSite(site_config)
     if site_config.type == "manyvids":
-        return ManyVidsSite(
-            site_config,
-            app_config.manyvids or ManyVidsScrapingConfig(),
+        raise ValueError(
+            "ManyVids sites are scheduled per-creator; use "
+            "_expand_manyvids_sites instead of _build_site."
         )
 
     raise ValueError(f"Unsupported site type: {site_config.type}")
 
 
-def _scheduler_jitter_seconds() -> int:
-    return random.randrange(900, 901)
+def _make_creator_site_config(
+    parent: SiteConfig,
+    creator: ManyVidsCreator,
+    scraping: ManyVidsScrapingConfig,
+) -> SiteConfig:
+    return parent.model_copy(
+        update={
+            "name": f"{parent.name}:{creator.creator_name}",
+            "interval_hours": scraping.creator_interval_hours,
+            "jitter_seconds": scraping.creator_jitter_seconds,
+            "creators": [creator],
+        }
+    )
+
+
+def _expand_manyvids_sites(
+    site_config: SiteConfig,
+    app_config: AppConfig,
+) -> list[tuple[SiteConfig, BaseSite]]:
+    scraping = app_config.manyvids or ManyVidsScrapingConfig()
+    expanded: list[tuple[SiteConfig, BaseSite]] = []
+    for creator in site_config.creators:
+        synth = _make_creator_site_config(site_config, creator, scraping)
+        expanded.append((synth, ManyVidsSite(synth, scraping, creator=creator)))
+    return expanded
+
+
+def _build_active_sites(
+    config: AppConfig,
+) -> list[tuple[SiteConfig, BaseSite]]:
+    active: list[tuple[SiteConfig, BaseSite]] = []
+    for site_config in config.sites:
+        if not site_config.enabled:
+            continue
+        if site_config.type == "manyvids":
+            active.extend(_expand_manyvids_sites(site_config, config))
+        else:
+            active.append((site_config, _build_site(site_config)))
+    return active
+
+
+def _scheduler_jitter_seconds(site_config: SiteConfig) -> int:
+    if site_config.jitter_seconds is not None:
+        return site_config.jitter_seconds
+    return _DEFAULT_JITTER_SECONDS
 
 
 async def _send_notification(webhook_url: str, item: Item) -> tuple[bool, str | None]:
@@ -181,7 +232,7 @@ async def run() -> None:
     webhook_url = os.environ.get(config.discord_webhook_env, config.discord_webhook_env)
     run_once = os.environ.get("RUN_ONCE") == "1"
     dry_run = os.environ.get("DRY_RUN") == "1"
-    active = [(sc, _build_site(sc, config)) for sc in config.sites if sc.enabled]
+    active = _build_active_sites(config)
 
     try:
         if run_once:
@@ -205,7 +256,7 @@ async def run() -> None:
                 _check_site,
                 trigger=IntervalTrigger(
                     hours=site_config.interval_hours,
-                    jitter=_scheduler_jitter_seconds(),
+                    jitter=_scheduler_jitter_seconds(site_config),
                     start_date=now + timedelta(seconds=30 + index * 30),
                 ),
                 args=[

@@ -47,16 +47,18 @@ def _scraping() -> ManyVidsScrapingConfig:
     )
 
 
-def _site(creators: list[ManyVidsCreator] | None = None) -> ManyVidsSite:
+def _site(creator: ManyVidsCreator | None = None) -> ManyVidsSite:
+    target = creator or _creator()
     return ManyVidsSite(
         SiteConfig(
             name="manyvids",
             display_name="ManyVids",
             type="manyvids",
             base_url="https://www.manyvids.com",
-            creators=creators if creators is not None else [_creator()],
+            creators=[target],
         ),
         _scraping(),
+        creator=target,
     )
 
 
