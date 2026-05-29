@@ -55,7 +55,7 @@ async def test_embed_structure() -> None:
         assert await send_video_notification(webhook_url, build_item()) is True
 
     embed = cast(dict[str, Any], captured_payload["embeds"][0])
-    assert embed["title"] == "Test Video"
+    assert embed["title"] == "New test_site Video: Test Video"
     assert embed["url"] == "https://example.com/videos/item-1"
     assert embed["image"] == {"url": "https://example.com/thumbs/item-1.jpg"}
     assert "thumbnail" not in embed
@@ -131,11 +131,37 @@ def test_embed_includes_metadata_fields_when_present() -> None:
         "inline": False,
     }
     assert fields[2:] == [
-        {"name": "Creator", "value": "Creator Name", "inline": True},
-        {"name": "Type", "value": "Regular", "inline": True},
         {"name": "Duration", "value": "12:34", "inline": True},
         {"name": "Price", "value": "5.99", "inline": True},
     ]
+
+
+def test_embed_title_mv_includes_creator_and_video_type() -> None:
+    embed = _build_embed(build_item(creator="Ashley Alban", video_type="regular"))
+
+    assert (
+        embed["title"] == "New test_site Video from Ashley Alban: Test Video (Regular)"
+    )
+
+
+def test_embed_title_mv_without_video_type_omits_parens() -> None:
+    embed = _build_embed(build_item(creator="Ashley Alban"))
+
+    assert embed["title"] == "New test_site Video from Ashley Alban: Test Video"
+
+
+def test_embed_title_non_mv_uses_simple_format() -> None:
+    embed = _build_embed(build_item())
+
+    assert embed["title"] == "New test_site Video: Test Video"
+
+
+def test_embed_title_falls_back_to_untitled() -> None:
+    item = build_item().model_copy(update={"title": "   "})
+
+    embed = _build_embed(item)
+
+    assert embed["title"] == "New test_site Video: Untitled video"
 
 
 def test_embed_omits_metadata_fields_when_absent() -> None:
