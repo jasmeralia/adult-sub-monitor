@@ -111,7 +111,18 @@ async def test_fetch_tags_parses_fixture_and_normalizes() -> None:
         timeout=1000,
     )
     page.locator.assert_called_once_with(TAGS_SELECTOR)
-    assert tags == ["AlternativeGirl", "POV", "Redhead", "SmallTits"]
+    assert tags == [
+        "AlternativeGirl",
+        "BigDicks",
+        "Cowgirl",
+        "Cumshots",
+        "Doggystyle",
+        "POV",
+        "POVBlowjob",
+        "POVSex",
+        "Redhead",
+        "SmallTits",
+    ]
 
 
 @pytest.mark.asyncio

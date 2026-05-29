@@ -31,7 +31,10 @@ BASE_URL = "https://www.manyvids.com"
 WEBDRIVER_MASK_SCRIPT = (
     "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
 )
-TAGS_SELECTOR = ".mv-hashtags a, [data-cy='tag'] a, .tags a"
+TAGS_SELECTOR = (
+    'a[class*="mavTag"], a[href^="/Vids?category="], '
+    ".mv-hashtags a, [data-cy='tag'] a, .tags a"
+)
 
 _RSC_PATTERN = re.compile(r'self\.__next_f\.push\(\[1,"(.*?)"\]\)', re.DOTALL)
 _VIDEO_PATTERN = re.compile(
@@ -86,30 +89,39 @@ class _TagHTMLParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.tags: list[str] = []
+        self._seen: set[str] = set()
         self._container_depth = 0
         self._capture_anchor = False
         self._anchor_text: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_map = dict(attrs)
-        classes = set((attr_map.get("class") or "").split())
-        is_tag_container = bool({"mv-hashtags", "tags"} & classes) or (
+        classes = (attr_map.get("class") or "").split()
+        class_set = set(classes)
+        is_tag_container = bool({"mv-hashtags", "tags"} & class_set) or (
             attr_map.get("data-cy") == "tag"
         )
         if is_tag_container or self._container_depth:
             self._container_depth += 1
 
-        if tag == "a" and (
-            self._container_depth > 0 or attr_map.get("data-cy") == "tag"
-        ):
-            self._capture_anchor = True
-            self._anchor_text = []
+        if tag == "a":
+            href = attr_map.get("href") or ""
+            is_tag_anchor = (
+                self._container_depth > 0
+                or attr_map.get("data-cy") == "tag"
+                or any("mavTag" in cls for cls in classes)
+                or href.startswith("/Vids?category=")
+            )
+            if is_tag_anchor:
+                self._capture_anchor = True
+                self._anchor_text = []
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "a" and self._capture_anchor:
             text = "".join(self._anchor_text)
             normalized = _normalize_tag(text)
-            if normalized:
+            if normalized and normalized not in self._seen:
+                self._seen.add(normalized)
                 self.tags.append(normalized)
             self._capture_anchor = False
             self._anchor_text = []
@@ -462,15 +474,15 @@ class ManyVidsSite(BaseSite):
             timeout=self.scraping.page_timeout,
         )
         locator = page.locator(TAGS_SELECTOR)
+        seen: set[str] = set()
         values: list[str] = []
         for index in range(await locator.count()):
             normalized = _normalize_tag(await locator.nth(index).inner_text())
-            if normalized:
+            if normalized and normalized not in seen:
+                seen.add(normalized)
                 values.append(normalized)
 
         if values:
             return values
 
-        # TODO: Reconfirm this selector against a live ManyVids detail page when
-        # network egress is available; current tests pin the fixture fallback.
         return _extract_tags_from_html(await page.content())
