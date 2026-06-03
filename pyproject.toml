@@ -10,7 +10,7 @@ dependencies = [
     "playwright>=1.60.0",
     "pydantic>=2.13.4",
     "apscheduler>=3.11.2",
-    "aiohttp>=3.13.5",
+    "aiohttp>=3.13.5,<3.14",
     "pyyaml>=6.0.3",
 ]
 
