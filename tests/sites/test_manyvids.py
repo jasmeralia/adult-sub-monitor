@@ -18,6 +18,7 @@ from adult_sub_monitor.sites.manyvids import (
     VideoData,
     _enrich_videos_from_dom,
     _extract_rsc_video_data,
+    _normalize_tag,
 )
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "manyvids"
@@ -94,6 +95,21 @@ def test_enrich_videos_from_dom_flips_mobile_and_overrides_thumbnail() -> None:
 
     assert videos[0].video_type == "mobile"
     assert videos[0].thumbnail_url == "https://cdn.example/dom-mobile.jpg"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("18And19YrsOld", "18 And 19 Yrs Old"),
+        ("Teens18Plus", "Teens 18 Plus"),
+        ("Nylons", "Nylons"),
+        ("PantyFetish", "Panty Fetish"),
+        ("Pantyhose", "Pantyhose"),
+        ("POVBlowjob", "POV Blowjob"),
+    ],
+)
+def test_normalize_tag(raw: str, expected: str) -> None:
+    assert _normalize_tag(raw) == expected
 
 
 @pytest.mark.asyncio

@@ -136,6 +136,8 @@ class _TagHTMLParser(HTMLParser):
 
 _CAMEL_BOUNDARY = re.compile(r"([a-z])([A-Z])")
 _ACRONYM_BOUNDARY = re.compile(r"([A-Z]+)([A-Z][a-z])")
+_DIGIT_TO_LETTER = re.compile(r"(\d)([A-Za-z])")
+_LETTER_TO_DIGIT = re.compile(r"([A-Za-z])(\d)")
 
 
 def _normalize_tag(text: str) -> str | None:
@@ -143,7 +145,10 @@ def _normalize_tag(text: str) -> str | None:
     if not normalized:
         return None
     normalized = _CAMEL_BOUNDARY.sub(r"\1 \2", normalized)
-    return _ACRONYM_BOUNDARY.sub(r"\1 \2", normalized)
+    normalized = _ACRONYM_BOUNDARY.sub(r"\1 \2", normalized)
+    normalized = _DIGIT_TO_LETTER.sub(r"\1 \2", normalized)
+    normalized = _LETTER_TO_DIGIT.sub(r"\1 \2", normalized)
+    return normalized
 
 
 def _build_page_url(
