@@ -189,31 +189,34 @@ async def _check_site(
         context = await browser_manager.ensure_authenticated(site, site_config)
         try:
             page = await context.new_page()
-            if site_config.listing_url is not None:
-                await page.goto(str(site_config.listing_url))
-            items = await site.get_latest_items(page, db)
+            try:
+                if site_config.listing_url is not None:
+                    await page.goto(str(site_config.listing_url))
+                items = await site.get_latest_items(page, db)
 
-            await _dispatch_new_items(
-                items,
-                site.name,
-                db,
-                effective_webhook,
-                notifications_enabled,
-                dry_run,
-            )
-
-            if dry_run:
-                logger.info("DRY_RUN: skipping pending notification retries")
-                return
-
-            if not notifications_enabled:
-                logger.debug(
-                    "Notifications disabled for %s; skipping pending retries",
+                await _dispatch_new_items(
+                    items,
                     site.name,
+                    db,
+                    effective_webhook,
+                    notifications_enabled,
+                    dry_run,
                 )
-                return
 
-            await _retry_pending_notifications(db, effective_webhook)
+                if dry_run:
+                    logger.info("DRY_RUN: skipping pending notification retries")
+                    return
+
+                if not notifications_enabled:
+                    logger.debug(
+                        "Notifications disabled for %s; skipping pending retries",
+                        site.name,
+                    )
+                    return
+
+                await _retry_pending_notifications(db, effective_webhook)
+            finally:
+                await page.close()
         finally:
             await context.close()
 
