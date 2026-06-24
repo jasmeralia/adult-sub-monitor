@@ -75,7 +75,9 @@ class BrowserManager:
                 env_user = site_config.credentials_env_user
                 env_pass = site_config.credentials_env_pass
                 if env_user is None or env_pass is None:
-                    raise RuntimeError(f"Credentials are not configured for {site.name}")
+                    raise RuntimeError(
+                        f"Credentials are not configured for {site.name}"
+                    )
                 username = os.environ.get(env_user, env_user)
                 password = os.environ.get(env_pass, env_pass)
                 await site.login(page, username, password)
