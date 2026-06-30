@@ -1,8 +1,9 @@
+from contextlib import asynccontextmanager
 from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
-from aioresponses import CallbackResult, aioresponses
 
 from adult_sub_monitor.discord import _build_embed, send_video_notification
 from adult_sub_monitor.models import Item
@@ -30,31 +31,73 @@ def build_item(
     )
 
 
+def _response(
+    status: int, body: str = "", *, retry_after: str | None = None
+) -> MagicMock:
+    r = MagicMock()
+    r.status = status
+    r.text = AsyncMock(return_value=body)
+    h: dict[str, str] = {}
+    if retry_after is not None:
+        h["Retry-After"] = retry_after
+    r.headers = h
+    return r
+
+
+@asynccontextmanager  # type: ignore[arg-type]
+async def _mock_session(*posts: MagicMock | Exception):  # type: ignore[misc]
+    """Patch ClientSession so consecutive session.post() calls return posts in order."""
+    call_idx = 0
+    captured_kwargs: list[dict[str, Any]] = []
+
+    class _PostCtx:
+        def __init__(self, kw: dict[str, Any]) -> None:
+            captured_kwargs.append(kw)
+
+        async def __aenter__(self) -> MagicMock:
+            nonlocal call_idx
+            r = posts[call_idx]
+            call_idx += 1
+            if isinstance(r, Exception):
+                raise r
+            return r  # type: ignore[return-value]
+
+        async def __aexit__(self, *_: object) -> None:
+            pass
+
+    mock_session = MagicMock()
+    mock_session.post = lambda _url, **kw: _PostCtx(kw)
+    mock_session._captured = captured_kwargs
+
+    with patch("adult_sub_monitor.discord.aiohttp.ClientSession") as cls:
+        cls.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        cls.return_value.__aexit__ = AsyncMock(return_value=None)
+        yield mock_session
+
+
 @pytest.mark.asyncio
 async def test_successful_post() -> None:
-    webhook_url = "https://discord.com/api/webhooks/test/success"
-
-    with aioresponses() as mocked:
-        mocked.post(webhook_url, status=200)
-
-        assert await send_video_notification(webhook_url, build_item()) is True
+    async with _mock_session(_response(200)):
+        assert (
+            await send_video_notification(
+                "https://discord.com/api/webhooks/test/success", build_item()
+            )
+            is True
+        )
 
 
 @pytest.mark.asyncio
 async def test_embed_structure() -> None:
-    webhook_url = "https://discord.com/api/webhooks/test/embed"
-    captured_payload: dict[str, Any] = {}
+    async with _mock_session(_response(200)) as sess:
+        assert (
+            await send_video_notification(
+                "https://discord.com/api/webhooks/test/embed", build_item()
+            )
+            is True
+        )
 
-    def capture_payload(_url: str, **kwargs: Any) -> CallbackResult:
-        captured_payload.update(kwargs["json"])
-        return CallbackResult(status=200)
-
-    with aioresponses() as mocked:
-        mocked.post(webhook_url, callback=capture_payload)
-
-        assert await send_video_notification(webhook_url, build_item()) is True
-
-    embed = cast(dict[str, Any], captured_payload["embeds"][0])
+    payload = sess._captured[0]["json"]
+    embed = cast(dict[str, Any], payload["embeds"][0])
     assert embed["title"] == "New test_site Video: Test Video"
     assert embed["url"] == "https://example.com/videos/item-1"
     assert embed["image"] == {"url": "https://example.com/thumbs/item-1.jpg"}
@@ -63,44 +106,48 @@ async def test_embed_structure() -> None:
 
 @pytest.mark.asyncio
 async def test_429_retry_success() -> None:
-    webhook_url = "https://discord.com/api/webhooks/test/retry"
-
-    with aioresponses() as mocked:
-        mocked.post(webhook_url, status=429, headers={"Retry-After": "0.01"})
-        mocked.post(webhook_url, status=200)
-
-        assert await send_video_notification(webhook_url, build_item()) is True
+    async with _mock_session(_response(429, retry_after="0.01"), _response(200)):
+        assert (
+            await send_video_notification(
+                "https://discord.com/api/webhooks/test/retry", build_item()
+            )
+            is True
+        )
 
 
 @pytest.mark.asyncio
 async def test_non_rate_limited_http_error_returns_false() -> None:
-    webhook_url = "https://discord.com/api/webhooks/test/server-error"
-
-    with aioresponses() as mocked:
-        mocked.post(webhook_url, status=500, body="server failed")
-
-        assert await send_video_notification(webhook_url, build_item()) is False
+    async with _mock_session(_response(500, "server failed")):
+        assert (
+            await send_video_notification(
+                "https://discord.com/api/webhooks/test/server-error", build_item()
+            )
+            is False
+        )
 
 
 @pytest.mark.asyncio
 async def test_429_retry_http_error_returns_false() -> None:
-    webhook_url = "https://discord.com/api/webhooks/test/retry-error"
-
-    with aioresponses() as mocked:
-        mocked.post(webhook_url, status=429, headers={"Retry-After": "0.01"})
-        mocked.post(webhook_url, status=503, body="still unavailable")
-
-        assert await send_video_notification(webhook_url, build_item()) is False
+    async with _mock_session(
+        _response(429, retry_after="0.01"), _response(503, "still unavailable")
+    ):
+        assert (
+            await send_video_notification(
+                "https://discord.com/api/webhooks/test/retry-error", build_item()
+            )
+            is False
+        )
 
 
 @pytest.mark.asyncio
 async def test_network_error_returns_false() -> None:
-    webhook_url = "https://discord.com/api/webhooks/test/error"
-
-    with aioresponses() as mocked:
-        mocked.post(webhook_url, exception=aiohttp.ClientError("network failed"))
-
-        assert await send_video_notification(webhook_url, build_item()) is False
+    async with _mock_session(aiohttp.ClientError("network failed")):
+        assert (
+            await send_video_notification(
+                "https://discord.com/api/webhooks/test/error", build_item()
+            )
+            is False
+        )
 
 
 @pytest.mark.asyncio
