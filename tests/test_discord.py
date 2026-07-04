@@ -15,6 +15,7 @@ def build_item(
     price: str | None = None,
     video_type: str | None = None,
     creator: str | None = None,
+    description: str | None = None,
 ) -> Item:
     return Item(
         site_name="test_site",
@@ -28,6 +29,7 @@ def build_item(
         price=price,
         video_type=video_type,
         creator=creator,
+        description=description,
     )
 
 
@@ -226,3 +228,22 @@ def test_embed_renders_missing_price_as_free(price: str | None) -> None:
     fields = cast(list[dict[str, Any]], embed["fields"])
     price_field = next(field for field in fields if field["name"] == "Price")
     assert price_field == {"name": "Price", "value": "Free", "inline": True}
+
+
+def test_embed_includes_description_when_present() -> None:
+    embed = _build_embed(build_item(description="A hot scene filmed outdoors."))
+
+    assert embed["description"] == "A hot scene filmed outdoors."
+
+
+def test_embed_omits_description_when_none() -> None:
+    embed = _build_embed(build_item())
+
+    assert "description" not in embed
+
+
+def test_embed_truncates_description_at_4096_chars() -> None:
+    long_desc = "x" * 5000
+    embed = _build_embed(build_item(description=long_desc))
+
+    assert len(cast(str, embed["description"])) == 4096

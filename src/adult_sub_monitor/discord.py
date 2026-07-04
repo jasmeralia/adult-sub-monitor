@@ -10,8 +10,8 @@ from adult_sub_monitor.models import Item
 logger = logging.getLogger(__name__)
 
 
-def _truncate_field(value: str) -> str:
-    return value[:1024]
+def _truncate_field(value: str, limit: int = 1024) -> str:
+    return value[:limit]
 
 
 def _build_title(item: Item) -> str:
@@ -35,6 +35,9 @@ def _build_embed(item: Item) -> dict[str, object]:
             )
         },
     }
+
+    if item.description:
+        embed["description"] = _truncate_field(item.description, 4096)
 
     if item.thumbnail_url:
         embed["image"] = {"url": str(item.thumbnail_url)}

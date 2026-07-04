@@ -185,3 +185,30 @@ sites:
 def test_missing_file_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Config file not found"):
         load_config(tmp_path / "missing.yaml")
+
+
+def test_blocked_keywords_round_trips(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+sites: []
+blocked_keywords:
+  - pee
+  - piss
+  - golden shower
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.blocked_keywords == ["pee", "piss", "golden shower"]
+
+
+def test_blocked_keywords_defaults_to_empty(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("sites: []\n", encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.blocked_keywords == []

@@ -134,6 +134,11 @@ class _TagHTMLParser(HTMLParser):
             self._anchor_text.append(data)
 
 
+_DESCRIPTION_PATTERN = re.compile(
+    r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']{1,4096})["\']',
+    re.IGNORECASE,
+)
+
 _CAMEL_BOUNDARY = re.compile(r"([a-z])([A-Z])")
 _ACRONYM_BOUNDARY = re.compile(r"([A-Z]+)([A-Z][a-z])")
 _DIGIT_TO_LETTER = re.compile(r"(\d)([A-Za-z])")
@@ -287,7 +292,7 @@ class ManyVidsSite(BaseSite):
         for video in result.videos:
             if video.title in known_titles:
                 continue
-            tags = await self._fetch_tags(page, video.url)
+            tags, description = await self._fetch_video_details(page, video.url)
             items.append(
                 Item(
                     site_name=self.display_name,
@@ -296,6 +301,7 @@ class ManyVidsSite(BaseSite):
                     url=video.url,
                     thumbnail_url=video.thumbnail_url,
                     tags=tags,
+                    description=description,
                     duration=video.duration,
                     price=video.price_regular,
                     video_type=video.video_type,
@@ -474,7 +480,9 @@ class ManyVidsSite(BaseSite):
             ),
         )
 
-    async def _fetch_tags(self, page: Page, url: str) -> list[str]:
+    async def _fetch_video_details(
+        self, page: Page, url: str
+    ) -> tuple[list[str], str | None]:
         await page.goto(
             url,
             wait_until="domcontentloaded",
@@ -489,7 +497,13 @@ class ManyVidsSite(BaseSite):
                 seen.add(normalized)
                 values.append(normalized)
 
-        if values:
-            return values
+        html = await page.content()
+        if not values:
+            values = _extract_tags_from_html(html)
 
-        return _extract_tags_from_html(await page.content())
+        description: str | None = None
+        m = _DESCRIPTION_PATTERN.search(html)
+        if m:
+            description = html_module.unescape(m.group(1)).strip() or None
+
+        return values, description
