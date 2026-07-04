@@ -67,6 +67,7 @@ class Database:
             "price": "TEXT",
             "video_type": "TEXT",
             "creator": "TEXT",
+            "description": "TEXT",
         }
 
         for column_name, column_type in metadata_columns.items():
@@ -91,9 +92,10 @@ class Database:
                 duration,
                 price,
                 video_type,
-                creator
+                creator,
+                description
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 item.site_name,
@@ -107,6 +109,7 @@ class Database:
                 item.price,
                 item.video_type,
                 item.creator,
+                item.description,
             ),
         )
         self.conn.commit()
@@ -152,7 +155,8 @@ class Database:
                 seen_items.duration,
                 seen_items.price,
                 seen_items.video_type,
-                seen_items.creator
+                seen_items.creator,
+                seen_items.description
             FROM failed_notifications
             JOIN seen_items
                 ON seen_items.site_name = failed_notifications.site_name
@@ -178,6 +182,7 @@ class Database:
                 price=row[8],
                 video_type=row[9],
                 creator=row[10],
+                description=row[11],
             )
             for row in cursor.fetchall()
         ]

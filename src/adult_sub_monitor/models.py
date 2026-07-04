@@ -16,6 +16,7 @@ class Item(BaseModel):
     price: str | None = None
     video_type: str | None = None
     creator: str | None = None
+    description: str | None = None
 
 
 class ManyVidsCreator(BaseModel):
@@ -92,3 +93,4 @@ class AppConfig(BaseModel):
     headless: bool = True
     user_agent: str | None = None
     manyvids: ManyVidsScrapingConfig | None = None
+    blocked_keywords: list[str] = Field(default_factory=list)

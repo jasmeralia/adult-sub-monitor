@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from adult_sub_monitor.filters import compile_blocked_keywords
 from adult_sub_monitor.main import (
     _build_site,
     _check_site,
@@ -428,6 +429,7 @@ async def test_per_site_lock_prevents_overlap() -> None:
             db,
             "https://discord.example/webhook",
             True,
+            [],
         )
     )
     second = asyncio.create_task(
@@ -438,6 +440,7 @@ async def test_per_site_lock_prevents_overlap() -> None:
             db,
             "https://discord.example/webhook",
             True,
+            [],
         )
     )
 
@@ -474,6 +477,7 @@ async def test_new_item_triggers_notification(mocker) -> None:
         db,
         "https://discord.example/webhook",
         False,
+        [],
     )
 
     send_video_notification.assert_awaited_once_with(
@@ -505,6 +509,7 @@ async def test_duplicate_item_skips_notification(mocker) -> None:
         db,
         "https://discord.example/webhook",
         False,
+        [],
     )
 
     send_video_notification.assert_not_called()
@@ -566,6 +571,7 @@ async def test_per_site_discord_webhook_override(mocker) -> None:
         db,
         "https://discord.example/global",
         False,
+        [],
     )
 
     send_video_notification.assert_awaited_once_with(
@@ -598,6 +604,7 @@ async def test_notifications_disabled_marks_seen_without_dispatch(mocker) -> Non
         db,
         "https://discord.example/global",
         False,
+        [],
     )
 
     db.mark_seen.assert_awaited_once_with(item)
@@ -629,7 +636,69 @@ async def test_notifications_disabled_skips_retry_loop(mocker) -> None:
         db,
         "https://discord.example/global",
         False,
+        [],
     )
 
     db.get_pending_retries.assert_not_called()
     send_video_notification.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_keyword_suppressed_marks_seen_skips_notification(mocker) -> None:
+    item = build_item()
+    site_config = build_site_config()
+    site = build_site(items=[item])
+    db = AsyncMock()
+    db.mark_seen = AsyncMock(return_value=True)
+    db.get_pending_retries = AsyncMock(return_value=[])
+    browser_manager = AsyncMock()
+    browser_manager.ensure_authenticated = AsyncMock(return_value=build_context())
+    send_video_notification = mocker.patch(
+        "adult_sub_monitor.main.send_video_notification",
+        new=AsyncMock(),
+    )
+    patterns = compile_blocked_keywords(["tag-one"])
+
+    await _check_site(
+        site,
+        site_config,
+        browser_manager,
+        db,
+        "https://discord.example/global",
+        False,
+        patterns,
+    )
+
+    db.mark_seen.assert_awaited_once_with(item)
+    send_video_notification.assert_not_called()
+    db.mark_notified.assert_not_called()
+    db.record_failed_notification.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_keyword_suppressed_skips_retry(mocker) -> None:
+    item = build_item()
+    site_config = build_site_config()
+    site = build_site(items=[])
+    db = AsyncMock()
+    db.get_pending_retries = AsyncMock(return_value=[item])
+    browser_manager = AsyncMock()
+    browser_manager.ensure_authenticated = AsyncMock(return_value=build_context())
+    send_video_notification = mocker.patch(
+        "adult_sub_monitor.main.send_video_notification",
+        new=AsyncMock(),
+    )
+    patterns = compile_blocked_keywords(["tag-one"])
+
+    await _check_site(
+        site,
+        site_config,
+        browser_manager,
+        db,
+        "https://discord.example/global",
+        False,
+        patterns,
+    )
+
+    send_video_notification.assert_not_called()
+    db.mark_notified.assert_not_called()

@@ -14,6 +14,11 @@ from adult_sub_monitor.browser import BrowserManager
 from adult_sub_monitor.config import load_config
 from adult_sub_monitor.db import Database
 from adult_sub_monitor.discord import send_video_notification
+from adult_sub_monitor.filters import (
+    KeywordPatterns,
+    compile_blocked_keywords,
+    find_blocked_keyword,
+)
 from adult_sub_monitor.models import (
     AppConfig,
     Item,
@@ -124,6 +129,7 @@ async def _dispatch_new_items(
     webhook_url: str,
     notifications_enabled: bool,
     dry_run: bool,
+    keyword_patterns: KeywordPatterns,
 ) -> None:
     for item in items:
         if dry_run:
@@ -147,6 +153,16 @@ async def _dispatch_new_items(
             )
             continue
 
+        matched = find_blocked_keyword(item, keyword_patterns)
+        if matched:
+            logger.info(
+                "Suppressed notification for %s:%s — matched blocked keyword %r",
+                site_name,
+                item.item_id,
+                matched,
+            )
+            continue
+
         success, error = await _send_notification(webhook_url, item)
         if success:
             await db.mark_notified(item)
@@ -160,8 +176,18 @@ async def _dispatch_new_items(
 async def _retry_pending_notifications(
     db: Database,
     webhook_url: str,
+    keyword_patterns: KeywordPatterns,
 ) -> None:
     for item in await db.get_pending_retries(max_attempts=10):
+        matched = find_blocked_keyword(item, keyword_patterns)
+        if matched:
+            logger.info(
+                "Suppressed retry for %s:%s — matched blocked keyword %r",
+                item.site_name,
+                item.item_id,
+                matched,
+            )
+            continue
         success, error = await _send_notification(webhook_url, item)
         if success:
             await db.mark_notified(item)
@@ -179,6 +205,7 @@ async def _check_site(
     db: Database,
     webhook_url: str,
     dry_run: bool,
+    keyword_patterns: KeywordPatterns,
 ) -> None:
     lock = _site_locks.setdefault(site.name, asyncio.Lock())
     notifications_enabled = site_config.notifications_enabled
@@ -201,6 +228,7 @@ async def _check_site(
                     effective_webhook,
                     notifications_enabled,
                     dry_run,
+                    keyword_patterns,
                 )
 
                 if dry_run:
@@ -214,7 +242,9 @@ async def _check_site(
                     )
                     return
 
-                await _retry_pending_notifications(db, effective_webhook)
+                await _retry_pending_notifications(
+                    db, effective_webhook, keyword_patterns
+                )
             finally:
                 await page.close()
         finally:
@@ -222,8 +252,7 @@ async def _check_site(
 
 
 async def run() -> None:
-    config_path = os.environ.get("CONFIG_PATH", "/config/config.yaml")
-    config = load_config(Path(config_path))
+    config = load_config(Path(os.environ.get("CONFIG_PATH", "/config/config.yaml")))
 
     logging.basicConfig(level=config.log_level)
 
@@ -239,6 +268,7 @@ async def run() -> None:
     run_once = os.environ.get("RUN_ONCE") == "1"
     dry_run = os.environ.get("DRY_RUN") == "1"
     active = _build_active_sites(config)
+    keyword_patterns = compile_blocked_keywords(config.blocked_keywords)
 
     try:
         if run_once:
@@ -250,6 +280,7 @@ async def run() -> None:
                     db,
                     webhook_url,
                     dry_run,
+                    keyword_patterns,
                 )
             return
 
@@ -272,6 +303,7 @@ async def run() -> None:
                     db,
                     webhook_url,
                     dry_run,
+                    keyword_patterns,
                 ],
                 id=f"check-{site.name}",
                 name=f"check-{site.name}",

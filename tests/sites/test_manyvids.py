@@ -10,6 +10,7 @@ from adult_sub_monitor.models import (
     SiteConfig,
 )
 from adult_sub_monitor.sites.manyvids import (
+    _DESCRIPTION_PATTERN,
     TAGS_SELECTOR,
     WEBDRIVER_MASK_SCRIPT,
     CreatorResult,
@@ -113,7 +114,7 @@ def test_normalize_tag(raw: str, expected: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_tags_parses_fixture_and_normalizes() -> None:
+async def test_fetch_video_details_parses_fixture_and_normalizes() -> None:
     site = _site()
     page = AsyncMock()
     locator = MagicMock()
@@ -121,7 +122,9 @@ async def test_fetch_tags_parses_fixture_and_normalizes() -> None:
     page.locator = MagicMock(return_value=locator)
     page.content = AsyncMock(return_value=_fixture("video_detail_with_tags.html"))
 
-    tags = await site._fetch_tags(page, "https://www.manyvids.com/Video/101/slug")
+    tags, description = await site._fetch_video_details(
+        page, "https://www.manyvids.com/Video/101/slug"
+    )
 
     page.goto.assert_awaited_once_with(
         "https://www.manyvids.com/Video/101/slug",
@@ -141,6 +144,18 @@ async def test_fetch_tags_parses_fixture_and_normalizes() -> None:
         "Redhead",
         "Small Tits",
     ]
+    assert description == "A steamy POV scene."
+
+
+def test_description_pattern_matches_og_meta() -> None:
+    html = '<meta property="og:description" content="She needed to pee badly." />'
+    m = _DESCRIPTION_PATTERN.search(html)
+    assert m is not None
+    assert m.group(1) == "She needed to pee badly."
+
+
+def test_description_pattern_returns_none_on_missing() -> None:
+    assert _DESCRIPTION_PATTERN.search("<html><body>no meta</body></html>") is None
 
 
 @pytest.mark.asyncio
@@ -223,7 +238,11 @@ async def test_get_latest_items_populates_manyvids_metadata() -> None:
                 )
             ),
         ),
-        patch.object(site, "_fetch_tags", new=AsyncMock(return_value=["POV"])),
+        patch.object(
+            site,
+            "_fetch_video_details",
+            new=AsyncMock(return_value=(["POV"], "A short description.")),
+        ),
     ):
         items = await site.get_latest_items(page, db)
 
@@ -239,6 +258,7 @@ async def test_get_latest_items_populates_manyvids_metadata() -> None:
             price="5.99",
             video_type="mobile",
             creator="Creator Name",
+            description="A short description.",
         )
     ]
     db.get_known_titles.assert_awaited_once_with("ManyVids")
