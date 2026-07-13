@@ -10,19 +10,13 @@ updates:
       dependency-type: development
     production-dependencies:
       dependency-type: production
-  reviewers:
-  - jasmeralia
 - package-ecosystem: github-actions
   directory: /
   schedule:
     interval: weekly
   open-pull-requests-limit: 5
-  reviewers:
-  - jasmeralia
 - package-ecosystem: docker
   directory: /
   schedule:
     interval: weekly
   open-pull-requests-limit: 5
-  reviewers:
-  - jasmeralia
