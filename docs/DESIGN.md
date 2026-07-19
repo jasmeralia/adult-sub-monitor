@@ -490,14 +490,14 @@ All output: spaces only, no trailing whitespace (enforced by ruff format).
 ### Makefile
 
 ```make
-.PHONY: help venv install lint lint-fix test test-cov clean docker-build docker-run
+.PHONY: help venv install lint lintfix test test-cov clean docker-build docker-run
 
 PYTHON := python3.13
 VENV := .venv
 VENV_BIN := $(VENV)/bin
 
 help:
-	@echo "Targets: venv install lint lint-fix test test-cov clean docker-build docker-run"
+	@echo "Targets: venv install lint lintfix test test-cov clean docker-build docker-run"
 
 venv:
 	$(PYTHON) -m venv $(VENV)
@@ -513,7 +513,7 @@ lint:
 	$(VENV_BIN)/mypy src
 	$(VENV_BIN)/pylint src
 
-lint-fix:
+lintfix:
 	$(VENV_BIN)/ruff check --fix src tests
 	$(VENV_BIN)/ruff format src tests
 
@@ -862,7 +862,7 @@ workflow notes.
 After any code change, always run:
 
 ```
-make lint-fix && make lint && make test
+make lintfix && make lint && make test
 ```
 
 All three must pass before committing.
@@ -875,7 +875,7 @@ Sections:
 1. **Project overview** — one paragraph summary + link to DESIGN.md
 2. **Repo conventions** — dashes in repo name, underscores in Python package
 3. **Code style** — spaces only, no trailing whitespace, ruff/mypy/pylint
-4. **Required workflow** — `make lint-fix && make lint && make test` after
+4. **Required workflow** — `make lintfix && make lint && make test` after
    every change (verbatim, called out in a callout block)
 5. **Architecture pointers** — short summary of each module + when to edit
 6. **Adding a new site** — step-by-step (new subclass, register in config

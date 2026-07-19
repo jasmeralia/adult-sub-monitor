@@ -1,4 +1,4 @@
-.PHONY: help venv install lint lint-fix test test-cov clean docker-build docker-run
+.PHONY: help venv install lint lintfix test test-cov clean docker-build docker-run
 
 PYTHON := python3
 VENV   := .venv
@@ -11,7 +11,7 @@ BIN :=
 endif
 
 help:
-	@echo "Targets: venv install lint lint-fix test test-cov clean docker-build docker-run"
+	@echo "Targets: venv install lint lintfix test test-cov clean docker-build docker-run"
 
 venv:
 	$(PYTHON) -m venv $(VENV)
@@ -27,7 +27,7 @@ lint:
 	$(BIN)mypy src
 	$(BIN)pylint src
 
-lint-fix:
+lintfix:
 	$(BIN)ruff check --fix src tests
 	$(BIN)ruff format src tests
 

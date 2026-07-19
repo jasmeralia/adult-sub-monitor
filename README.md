@@ -51,7 +51,7 @@ Dockerized Python service that monitors subscription and public creator video si
 | `venv` | Create the local virtual environment and upgrade pip. |
 | `install` | Install the project with development dependencies and Chromium for Playwright. |
 | `lint` | Run ruff checks, ruff format check, mypy, and pylint. |
-| `lint-fix` | Run ruff auto-fixes and formatting. |
+| `lintfix` | Run ruff auto-fixes and formatting. |
 | `test` | Run pytest. |
 | `test-cov` | Run pytest with coverage reporting and the configured coverage threshold. |
 | `clean` | Remove local caches, coverage output, and the virtual environment. |

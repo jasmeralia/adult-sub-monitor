@@ -16,9 +16,9 @@ Use spaces only, no tabs. Do not leave trailing whitespace. Linting runs through
 
 > After any code change, always run:
 > ```
-> make lint-fix && make lint && make test
+> make lintfix && make lint && make test
 > ```
-> Run `lint-fix` first — it auto-corrects import order, formatting, and other fixable issues before `lint` checks them. All three targets must pass before committing.
+> Run `lintfix` first — it auto-corrects import order, formatting, and other fixable issues before `lint` checks them. All three targets must pass before committing.
 
 ## 5. Architecture pointers
 
