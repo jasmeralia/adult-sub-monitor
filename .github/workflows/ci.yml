@@ -27,6 +27,12 @@ jobs:
           python-version: "3.13"
       - run: pip install -e ".[dev]"
       - run: make test-cov
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          fail_ci_if_error: false
 
   release:
     needs: [lint, test]

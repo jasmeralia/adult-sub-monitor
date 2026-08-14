@@ -53,7 +53,7 @@ Dockerized Python service that monitors subscription and public creator video si
 | `lint` | Run ruff checks, ruff format check, mypy, and pylint. |
 | `lintfix` | Run ruff auto-fixes and formatting. |
 | `test` | Run pytest. |
-| `test-cov` | Run pytest with coverage reporting and the configured coverage threshold. |
+| `test-cov` | Run pytest with an 80% threshold and write `coverage.xml` for Codecov. |
 | `clean` | Remove local caches, coverage output, and the virtual environment. |
 | `docker-build` | Build the local development Docker image. |
 | `docker-run` | Start the service with Docker Compose. |
