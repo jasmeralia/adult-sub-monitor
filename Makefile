@@ -35,7 +35,7 @@ test:
 	$(BIN)pytest
 
 test-cov:
-	$(BIN)pytest --cov=adult_sub_monitor --cov-report=term-missing --cov-fail-under=80
+	$(BIN)pytest --cov=adult_sub_monitor --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=80
 
 clean:
 	rm -rf $(VENV) .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage
