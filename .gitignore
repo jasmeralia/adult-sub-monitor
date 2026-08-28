@@ -11,3 +11,4 @@ data/
 *.egg-info/
 .env
 uv.lock
+.kanna
