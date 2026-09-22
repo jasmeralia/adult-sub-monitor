@@ -1,4 +1,6 @@
-FROM mcr.microsoft.com/playwright/python:v1.62.0-noble
+# Tag must match the exact "playwright" pip version pinned in pyproject.toml —
+# this image's bundled browser binaries only work with that same release.
+FROM mcr.microsoft.com/playwright/python:v1.63.0-noble
 
 WORKDIR /app
 
