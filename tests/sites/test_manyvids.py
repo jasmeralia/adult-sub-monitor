@@ -118,7 +118,7 @@ async def test_fetch_video_details_parses_fixture_and_normalizes() -> None:
     site = _site()
     page = AsyncMock()
     locator = MagicMock()
-    locator.count = AsyncMock(return_value=0)
+    locator.all_inner_texts = AsyncMock(return_value=[])
     page.locator = MagicMock(return_value=locator)
     page.content = AsyncMock(return_value=_fixture("video_detail_with_tags.html"))
 
@@ -280,3 +280,22 @@ def test_context_options_returns_manyvids_browser_options() -> None:
 
 def test_init_scripts_contains_webdriver_mask() -> None:
     assert _site().init_scripts() == [WEBDRIVER_MASK_SCRIPT]
+
+
+@pytest.mark.asyncio
+async def test_fetch_video_details_reads_tags_without_per_element_waits() -> None:
+    site = _site()
+    page = AsyncMock()
+    locator = MagicMock()
+    locator.all_inner_texts = AsyncMock(
+        return_value=["POVBlowjob", " ", "POVBlowjob", "Nylons"]
+    )
+    locator.nth = MagicMock(side_effect=AssertionError("per-index reads can time out"))
+    page.locator = MagicMock(return_value=locator)
+    page.content = AsyncMock(return_value="<html></html>")
+
+    tags, _ = await site._fetch_video_details(
+        page, "https://www.manyvids.com/Video/1/x"
+    )
+
+    assert tags == ["POV Blowjob", "Nylons"]

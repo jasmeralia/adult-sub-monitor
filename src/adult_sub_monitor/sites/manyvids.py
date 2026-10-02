@@ -491,8 +491,10 @@ class ManyVidsSite(BaseSite):
         locator = page.locator(TAGS_SELECTOR)
         seen: set[str] = set()
         values: list[str] = []
-        for index in range(await locator.count()):
-            normalized = _normalize_tag(await locator.nth(index).inner_text())
+        # One atomic read: per-index inner_text() waits (30s) on each nth()
+        # element and raises if the page re-renders and the count shrinks.
+        for text in await locator.all_inner_texts():
+            normalized = _normalize_tag(text)
             if normalized and normalized not in seen:
                 seen.add(normalized)
                 values.append(normalized)
