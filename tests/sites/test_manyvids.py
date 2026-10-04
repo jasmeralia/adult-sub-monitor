@@ -16,6 +16,7 @@ from adult_sub_monitor.sites.manyvids import (
     CreatorResult,
     ManyVidsSite,
     ScraperBlockedError,
+    ScraperNotFoundError,
     VideoData,
     _enrich_videos_from_dom,
     _extract_rsc_video_data,
@@ -184,6 +185,28 @@ async def test_scrape_creator_early_stops_when_page_titles_are_known() -> None:
 
 
 @pytest.mark.asyncio
+async def test_scrape_creator_keeps_videos_when_later_page_is_not_found() -> None:
+    site = _site()
+    page = AsyncMock()
+    load_page = AsyncMock(
+        side_effect=[
+            _fixture("creator_store_regular_p1.html"),
+            ScraperNotFoundError("page 2 is unavailable"),
+            _fixture("creator_store_mobile_p1.html"),
+        ]
+    )
+
+    with (
+        patch.object(site, "_load_page", load_page),
+        patch("adult_sub_monitor.sites.manyvids.asyncio.sleep", new=AsyncMock()),
+    ):
+        result = await site._scrape_creator(page, _creator(), set())
+
+    assert [video.video_id for video in result.videos] == ["101", "102", "201"]
+    assert result.error is None
+
+
+@pytest.mark.asyncio
 async def test_scrape_creator_with_retry_retries_block_then_succeeds() -> None:
     site = _site()
     page = AsyncMock()
@@ -206,6 +229,22 @@ async def test_scrape_creator_with_retry_retries_block_then_succeeds() -> None:
 
     assert result is expected
     assert scrape_creator.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_scrape_creator_with_retry_does_not_retry_missing_profile() -> None:
+    site = _site()
+    page = AsyncMock()
+    scrape_creator = AsyncMock(
+        side_effect=ScraperNotFoundError("creator profile is unavailable")
+    )
+
+    with patch.object(site, "_scrape_creator", scrape_creator):
+        result = await site.scrape_creator_with_retry(page, _creator(), set())
+
+    assert result.error == "creator profile is unavailable"
+    assert result.videos == []
+    scrape_creator.assert_awaited_once()
 
 
 @pytest.mark.asyncio
