@@ -179,6 +179,21 @@ async def test_load_page_identifies_nextjs_not_found_page() -> None:
 
 
 @pytest.mark.asyncio
+async def test_load_page_reports_rsc_timeout_without_not_found_marker() -> None:
+    site = _site()
+    page = AsyncMock()
+    page.title = AsyncMock(return_value="Creator videos")
+    page.wait_for_function = AsyncMock(side_effect=PlaywrightTimeout("timeout"))
+    page.content = AsyncMock(return_value="<html>temporarily unavailable</html>")
+
+    with pytest.raises(ScraperError, match="RSC video payload never appeared"):
+        await site._load_page(
+            page,
+            "https://www.manyvids.com/Profile/1/creator/Store/Videos?sort=newest",
+        )
+
+
+@pytest.mark.asyncio
 async def test_scrape_creator_early_stops_when_page_titles_are_known() -> None:
     site = _site()
     page = AsyncMock()
