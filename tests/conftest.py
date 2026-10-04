@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from unittest.mock import AsyncMock
@@ -21,8 +22,12 @@ def tmp_db_path() -> Path:
 
 
 @pytest.fixture
-def db() -> Database:
-    return Database(Path(":memory:"))
+def db() -> Iterator[Database]:
+    database = Database(Path(":memory:"))
+    try:
+        yield database
+    finally:
+        database.conn.close()
 
 
 @pytest.fixture
