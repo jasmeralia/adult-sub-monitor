@@ -2,6 +2,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from adult_sub_monitor.models import (
     Item,
@@ -16,6 +17,7 @@ from adult_sub_monitor.sites.manyvids import (
     CreatorResult,
     ManyVidsSite,
     ScraperBlockedError,
+    ScraperError,
     ScraperNotFoundError,
     VideoData,
     _enrich_videos_from_dom,
@@ -160,6 +162,23 @@ def test_description_pattern_returns_none_on_missing() -> None:
 
 
 @pytest.mark.asyncio
+async def test_load_page_identifies_nextjs_not_found_page() -> None:
+    site = _site()
+    page = AsyncMock()
+    page.title = AsyncMock(return_value="Creator videos")
+    page.wait_for_function = AsyncMock(side_effect=PlaywrightTimeout("timeout"))
+    page.content = AsyncMock(
+        return_value='<script>"NEXT_HTTP_ERROR_FALLBACK;404"</script>'
+    )
+
+    with pytest.raises(ScraperNotFoundError, match="returned a 404 page"):
+        await site._load_page(
+            page,
+            "https://www.manyvids.com/Profile/1/creator/Store/Videos?sort=newest",
+        )
+
+
+@pytest.mark.asyncio
 async def test_scrape_creator_early_stops_when_page_titles_are_known() -> None:
     site = _site()
     page = AsyncMock()
@@ -235,16 +254,40 @@ async def test_scrape_creator_with_retry_retries_block_then_succeeds() -> None:
 async def test_scrape_creator_with_retry_does_not_retry_missing_profile() -> None:
     site = _site()
     page = AsyncMock()
-    scrape_creator = AsyncMock(
+    load_page = AsyncMock(
         side_effect=ScraperNotFoundError("creator profile is unavailable")
     )
 
-    with patch.object(site, "_scrape_creator", scrape_creator):
+    with patch.object(site, "_load_page", load_page):
         result = await site.scrape_creator_with_retry(page, _creator(), set())
 
     assert result.error == "creator profile is unavailable"
     assert result.videos == []
-    scrape_creator.assert_awaited_once()
+    load_page.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_scrape_creator_with_retry_retries_generic_scraper_error() -> None:
+    site = _site()
+    page = AsyncMock()
+    expected = CreatorResult(
+        creator_id="1002990973",
+        creator_name="creator_slug",
+        videos=[],
+        total_pages=1,
+    )
+
+    with (
+        patch.object(
+            site,
+            "_scrape_creator",
+            new=AsyncMock(side_effect=[ScraperError("transient"), expected]),
+        ),
+        patch("adult_sub_monitor.sites.manyvids.asyncio.sleep", new=AsyncMock()),
+    ):
+        result = await site.scrape_creator_with_retry(page, _creator(), set())
+
+    assert result is expected
 
 
 @pytest.mark.asyncio
