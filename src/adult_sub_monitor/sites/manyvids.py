@@ -85,6 +85,10 @@ class ScraperBlockedError(ScraperError):
     pass
 
 
+class ScraperNotFoundError(ScraperError):
+    pass
+
+
 class _TagHTMLParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -341,6 +345,11 @@ class ManyVidsSite(BaseSite):
                 timeout=self.scraping.page_timeout,
             )
         except PlaywrightTimeout as exc:
+            html = await page.content()
+            if "NEXT_HTTP_ERROR_FALLBACK;404" in html:
+                raise ScraperNotFoundError(
+                    f"ManyVids returned a 404 page at {url}"
+                ) from exc
             raise ScraperError(
                 f"RSC video payload never appeared at {url}; "
                 "possible WAF block or page structure change"
@@ -389,7 +398,19 @@ class ManyVidsSite(BaseSite):
                     page_num,
                     url,
                 )
-                html = await self._load_page(page, url)
+                try:
+                    html = await self._load_page(page, url)
+                except ScraperNotFoundError:
+                    if page_num == 1:
+                        raise
+                    logger.info(
+                        "Creator %s: stopping %s pagination at page %s after 404",
+                        creator.creator_name,
+                        section_name,
+                        page_num,
+                    )
+                    section_total_pages = page_num - 1
+                    break
                 page_videos, section_total_pages = _extract_rsc_video_data(html)
                 if not page_videos:
                     logger.info(
@@ -454,6 +475,17 @@ class ManyVidsSite(BaseSite):
                     creator.creator_name,
                     attempt + 1,
                     exc,
+                )
+            except ScraperNotFoundError as exc:
+                logger.warning(
+                    "Creator %s: profile unavailable: %s", creator.creator_name, exc
+                )
+                return CreatorResult(
+                    creator_id=creator.creator_id,
+                    creator_name=creator.creator_name,
+                    videos=[],
+                    total_pages=0,
+                    error=str(exc),
                 )
             except ScraperError as exc:
                 last_error = exc
