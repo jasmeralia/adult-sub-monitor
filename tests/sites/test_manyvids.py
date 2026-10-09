@@ -162,6 +162,24 @@ def test_description_pattern_returns_none_on_missing() -> None:
 
 
 @pytest.mark.asyncio
+async def test_load_page_does_not_wait_for_network_idle() -> None:
+    site = _site()
+    page = AsyncMock()
+    page.title = AsyncMock(return_value="Creator videos")
+    page.content = AsyncMock(return_value="<html></html>")
+    url = "https://www.manyvids.com/Profile/1/creator/Store/Videos?sort=newest"
+
+    await site._load_page(page, url)
+
+    page.goto.assert_awaited_once_with(
+        url,
+        wait_until="domcontentloaded",
+        timeout=site.scraping.page_timeout,
+    )
+    page.wait_for_function.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_load_page_identifies_nextjs_not_found_page() -> None:
     site = _site()
     page = AsyncMock()

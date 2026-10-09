@@ -317,9 +317,12 @@ class ManyVidsSite(BaseSite):
 
     async def _load_page(self, page: Page, url: str) -> str:
         try:
+            # The video payload is inline, so wait_for_function below is the real
+            # readiness check; networkidle also waits on ~150 ad/tracker requests
+            # and routinely takes 10-30s, which trips the page timeout.
             await page.goto(
                 url,
-                wait_until="networkidle",
+                wait_until="domcontentloaded",
                 timeout=self.scraping.page_timeout,
             )
         except PlaywrightTimeout as exc:
