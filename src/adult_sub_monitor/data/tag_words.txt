@@ -1,0 +1,82 @@
+# Default tag word list shipped with adult-sub-monitor.
+#
+# Run-together ManyVids tags ("deeppenetration") are split into words
+# automatically ("Deep Penetration"). Entries here fix what the splitter gets
+# wrong or spells inconsistently. Operators layer their own list on top (see the
+# README); an operator entry of "-Word" removes one of these defaults.
+#
+# A single word is kept whole and shown exactly as written. A phrase (with
+# spaces) is used verbatim when a tag matches it with the spaces removed.
+
+# Acronyms
+ASMR
+ATM
+BBC
+BBW
+BDSM
+BJ
+BWC
+CBT
+CFNM
+DP
+FFFM
+FFM
+GFE
+JOI
+MFM
+MFF
+MILF
+MMF
+MMMF
+POV
+SFW
+SPH
+
+# Compounds that read as one word (matches the spelling ManyVids itself uses)
+Blowjob
+Blowjobs
+Cocksucking
+Cumshot
+Cumshots
+Creampie
+Deepthroat
+Doggystyle
+Facesitting
+Footjob
+Gangbang
+Handjob
+Pornstar
+Rimjob
+Schoolgirl
+Titjob
+
+# Words and names the splitter would otherwise chew into fragments
+Ahegao
+Cuckolding
+Gooning
+Minecraft
+Satisfyer
+Scissoring
+Skyrim
+Twerk
+Twerking
+
+# Family terms ("Stepson" would otherwise become "Steps On")
+Stepbrother
+Stepcousin
+Stepdad
+Stepdaddy
+Stepdaughter
+Stepmom
+Stepmommy
+Stepsister
+Stepson
+
+# Phrases the splitter gets wrong ("cuminhair" is not "Cumin Hair")
+Asian Femdom
+Cum In Hair
+Dripping Creampie
+Ex Boyfriend
+Ex Girlfriend
+Male Sub
+Solo Girl
