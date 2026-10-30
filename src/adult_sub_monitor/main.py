@@ -30,6 +30,7 @@ from adult_sub_monitor.sites.base import BaseSite
 from adult_sub_monitor.sites.manyvids import ManyVidsSite
 from adult_sub_monitor.sites.venus_platform import VenusPlatformSite
 from adult_sub_monitor.sites.wowgirls_platform import WowgirlsPlatformSite
+from adult_sub_monitor.tags import configure_tag_overrides, load_tag_overrides
 
 logger = logging.getLogger(__name__)
 _site_locks: dict[str, asyncio.Lock] = {}
@@ -268,6 +269,7 @@ async def run() -> None:
     run_once = os.environ.get("RUN_ONCE") == "1"
     dry_run = os.environ.get("DRY_RUN") == "1"
     active = _build_active_sites(config)
+    configure_tag_overrides(load_tag_overrides())
     keyword_patterns = compile_blocked_keywords(config.blocked_keywords)
 
     try:

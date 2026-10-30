@@ -21,6 +21,7 @@ from adult_sub_monitor.models import (
     SiteConfig,
 )
 from adult_sub_monitor.sites.base import BaseSite
+from adult_sub_monitor.tags import format_tag
 
 if TYPE_CHECKING:
     from adult_sub_monitor.db import Database
@@ -139,8 +140,9 @@ class _TagHTMLParser(HTMLParser):
 
 
 _DESCRIPTION_PATTERN = re.compile(
-    r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']{1,4096})["\']',
-    re.IGNORECASE,
+    r'<meta[^>]+property=["\']og:description["\'][^>]+'
+    r"content=(?P<quote>[\"'])(?P<value>(?:(?!(?P=quote)).){1,4096})(?P=quote)",
+    re.IGNORECASE | re.DOTALL,
 )
 
 _CAMEL_BOUNDARY = re.compile(r"([a-z])([A-Z])")
@@ -157,7 +159,7 @@ def _normalize_tag(text: str) -> str | None:
     normalized = _ACRONYM_BOUNDARY.sub(r"\1 \2", normalized)
     normalized = _DIGIT_TO_LETTER.sub(r"\1 \2", normalized)
     normalized = _LETTER_TO_DIGIT.sub(r"\1 \2", normalized)
-    return normalized
+    return format_tag(normalized)
 
 
 def _build_page_url(
@@ -541,6 +543,6 @@ class ManyVidsSite(BaseSite):
         description: str | None = None
         m = _DESCRIPTION_PATTERN.search(html)
         if m:
-            description = html_module.unescape(m.group(1)).strip() or None
+            description = html_module.unescape(m.group("value")).strip() or None
 
         return values, description

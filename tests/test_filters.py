@@ -36,6 +36,30 @@ def _item(
         ("Nice video", ["Golden Shower"], None, ["golden shower"], "golden shower"),
         # compound keyword as tag (un-split)
         ("Nice video", ["pisskink"], None, ["pisskink"], "pisskink"),
+        # run-together keyword matches the split spelling used for display
+        (
+            "Nice video",
+            ["Deep Penetration"],
+            None,
+            ["deeppenetration"],
+            "deeppenetration",
+        ),
+        # split keyword matches the run-together spelling
+        (
+            "Nice video",
+            ["deeppenetration"],
+            None,
+            ["deep penetration"],
+            "deep penetration",
+        ),
+        # hyphenated and capitalized spellings
+        ("Deep-Penetration scene", [], None, ["deeppenetration"], "deeppenetration"),
+        # a word-list entry ("Deepthroat") also matches its spaced spelling
+        ("Nice video", ["Deep Throat"], None, ["deepthroat"], "deepthroat"),
+        ("Nice video", ["Deepthroat"], None, ["deep throat"], "deep throat"),
+        # looser spacing still respects word boundaries
+        ("Nice video", ["Deep Penetrations"], None, ["deeppenetration"], None),
+        ("Nice video", ["Undeep Penetration"], None, ["deeppenetration"], None),
         # no match — unrelated content
         ("Nice regular video", ["POV", "Blowjob"], None, ["pee", "piss"], None),
         # word boundary: "speed" must not match "pee"

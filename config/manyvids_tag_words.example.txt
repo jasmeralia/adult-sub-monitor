@@ -1,0 +1,19 @@
+# Optional ManyVids tag word list, layered on top of the defaults shipped in the
+# image (src/adult_sub_monitor/data/tag_words.txt). You only list what you want to
+# add or change; there is nothing to copy from the repo first.
+#
+# Copy to manyvids_tag_words.txt next to config.yaml (or point
+# MANYVIDS_TAG_WORDS_FILE at it). The same entries can be passed comma-separated in
+# the MANYVIDS_TAG_WORDS env var, which is applied after this file.
+#
+# ManyVids tags often arrive as one lowercase run ("deeppenetration"). They are
+# split into words automatically ("Deep Penetration") and each word is capitalized.
+# One entry per line, '#' starts a comment. Later entries win over earlier ones.
+#
+# A single word is kept whole and shown exactly as written:
+Kinkster
+# A phrase (with spaces) is used verbatim when a tag matches it without spaces:
+Pet Play
+# A leading dash drops an entry, including one of the shipped defaults, so
+# "deepthroat" goes back to being split into "Deep Throat":
+-Deepthroat

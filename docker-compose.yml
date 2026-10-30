@@ -8,3 +8,6 @@ services:
       - ./data:/data
     environment:
       - LOG_LEVEL=INFO
+      # Optional ManyVids tag words, layered over the shipped defaults (or use
+      # config/manyvids_tag_words.txt). A leading dash drops a default entry:
+      # - MANYVIDS_TAG_WORDS=Kinkster,Pet Play,-Deepthroat

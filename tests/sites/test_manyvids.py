@@ -110,6 +110,10 @@ def test_enrich_videos_from_dom_flips_mobile_and_overrides_thumbnail() -> None:
         ("PantyFetish", "Panty Fetish"),
         ("Pantyhose", "Pantyhose"),
         ("POVBlowjob", "POV Blowjob"),
+        ("naughty", "Naughty"),
+        ("deeppenetration", "Deep Penetration"),
+        ("bigdildo", "Big Dildo"),
+        ("#naughty girl", "Naughty Girl"),
     ],
 )
 def test_normalize_tag(raw: str, expected: str) -> None:
@@ -154,7 +158,26 @@ def test_description_pattern_matches_og_meta() -> None:
     html = '<meta property="og:description" content="She needed to pee badly." />'
     m = _DESCRIPTION_PATTERN.search(html)
     assert m is not None
-    assert m.group(1) == "She needed to pee badly."
+    assert m.group("value") == "She needed to pee badly."
+
+
+@pytest.mark.parametrize(
+    ("html", "expected"),
+    [
+        (
+            '<meta property="og:description" content="It\'s huge, isn\'t it?" />',
+            "It's huge, isn't it?",
+        ),
+        (
+            "<meta property='og:description' content='Say \"hello\" to her' />",
+            'Say "hello" to her',
+        ),
+    ],
+)
+def test_description_pattern_keeps_embedded_quotes(html: str, expected: str) -> None:
+    m = _DESCRIPTION_PATTERN.search(html)
+    assert m is not None
+    assert m.group("value") == expected
 
 
 def test_description_pattern_returns_none_on_missing() -> None:

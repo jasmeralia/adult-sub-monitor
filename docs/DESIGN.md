@@ -83,6 +83,8 @@ adult-sub-monitor/
 │       ├── discord.py            # Webhook notifier
 │       ├── config.py             # Pydantic config models
 │       ├── models.py             # Domain types (Item, Site, etc.)
+│       ├── tags.py               # Tag word splitting + capitalization
+│       ├── data/tag_words.txt    # Shipped default tag word list
 │       └── sites/
 │           ├── __init__.py
 │           ├── base.py           # BaseSite ABC
@@ -217,7 +219,23 @@ early-stop behavior against known titles, retry/backoff for blocked or failed
 creator scrapes, per-video detail-page tag extraction, and metadata enrichment
 for creator, type, duration, and price. It overrides `requires_auth`,
 `context_options()`, and `init_scripts()` to run without stored credentials and
-with ManyVids-specific browser context settings.
+with ManyVids-specific browser context settings. The `og:description` meta
+content is read with a quote-aware pattern so apostrophes in descriptions are
+kept, and tags are passed through `tags.format_tag`.
+
+**`tags.py` — tag formatting**
+
+Splits run-together tags (`deeppenetration` -> `Deep Penetration`, `Peefetish` ->
+`Pee Fetish`) with `wordsegment` and capitalizes the first letter of every word.
+Splits that leave fragments or pieces too rare to be words are rejected and the
+word kept whole. A layered word list corrects what the splitter gets wrong; later
+layers win: the shipped `data/tag_words.txt`, then the operator's file
+(`MANYVIDS_TAG_WORDS_FILE`, default `/config/manyvids_tag_words.txt`), then
+`MANYVIDS_TAG_WORDS` (comma-separated). Single-word entries are kept whole and
+displayed as written, entries with spaces are used verbatim for the matching
+space-less tag, and a `-Entry` removes an earlier one. `split_words()` uses the
+stock word list without the overrides; `filters.py` uses it so blocked keywords
+match any spacing of the same words.
 
 ## Data Model
 
@@ -385,6 +403,8 @@ manyvids:
 | `RUN_ONCE`                | unset                    | Set `1` to run one cycle and exit        |
 | `DRY_RUN`                 | unset                    | Skip DB writes + notifications           |
 | `LOG_LEVEL`               | `INFO`                   | Override log level                       |
+| `MANYVIDS_TAG_WORDS`      | unset                    | Comma-separated tag words, layered over defaults |
+| `MANYVIDS_TAG_WORDS_FILE` | `/config/manyvids_tag_words.txt` | Tag word file, layered over defaults (optional) |
 
 ---
 
@@ -595,6 +615,7 @@ services:
 | `config.py`                     | `tests/test_config.py`                 | YAML fixtures, Pydantic validation     |
 | `browser.py`                    | `tests/test_browser.py`                | `AsyncMock` for Playwright objects     |
 | `main.py`                       | `tests/test_main.py`                   | Mocked scheduler, mocked sites         |
+| `tags.py`                       | `tests/test_tags.py`                   | Pure functions, env/file loading       |
 | `sites/base.py`                 | `tests/sites/test_base.py`             | Concrete test subclass                 |
 | `sites/manyvids.py`             | `tests/sites/test_manyvids.py`         | HTML fixtures + AsyncMock pages        |
 | `sites/venus_platform.py`       | `tests/sites/test_venus_platform.py`   | HTML fixtures + AsyncMock pages        |

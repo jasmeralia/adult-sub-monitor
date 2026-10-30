@@ -43,6 +43,28 @@ Dockerized Python service that monitors subscription and public creator video si
 | `RUN_ONCE` | No | Set to `1` to run one check cycle and exit. |
 | `DRY_RUN` | No | Set to `1` to skip DB writes and Discord notifications. |
 | `LOG_LEVEL` | No | Override log level. Defaults to `INFO`. |
+| `MANYVIDS_TAG_WORDS` | No | Comma-separated ManyVids tag word entries layered over the shipped defaults (see [Tag formatting](#manyvids-tag-formatting)). |
+| `MANYVIDS_TAG_WORDS_FILE` | No | Path to a tag word override file. Defaults to `/config/manyvids_tag_words.txt`; ignored if the file does not exist. Layered over the shipped defaults. |
+
+## ManyVids Tag Formatting
+
+ManyVids tags often arrive as one lowercase run (`deeppenetration`) or all lowercase (`naughty`). Notifications show them split into words with each word capitalized (`Deep Penetration`, `Naughty`), using the [`wordsegment`](https://pypi.org/project/wordsegment/) English word-frequency list. Capitalized run-together tags such as `Peefetish` are split too. A split is skipped when it would leave fragments (`satisfyer` is not "Satisfy Er") or pieces too rare to be words (a creator name like `Tantaly`).
+
+The splitter still needs help with domain terms and acronyms, so the image ships a default word list (`src/adult_sub_monitor/data/tag_words.txt`) covering `Deepthroat`, `Blowjob`, `POV`, `BBC`, `Stepmom` and similar. You can layer your own list on top without copying the defaults. Layers apply in order and later ones win:
+
+1. The shipped defaults.
+2. A file with one entry per line (`#` starts a comment), read if present at `/config/manyvids_tag_words.txt` (bind-mounted with the rest of `config/`) or at the path in `MANYVIDS_TAG_WORDS_FILE`. See `config/manyvids_tag_words.example.txt`.
+3. `MANYVIDS_TAG_WORDS`: comma-separated entries, e.g. `Kinkster,Pet Play,-Deepthroat`.
+
+Entry forms:
+
+- `Deepthroat` or `POV` (a single word) is never split and is displayed exactly as written.
+- `Solo Girl` (a phrase with spaces) is used verbatim whenever a tag matches it with the spaces removed (`sologirl`).
+- `-Deepthroat` (leading dash) removes an entry from an earlier layer, e.g. one of the shipped defaults.
+
+The lists are read once at startup, so restart the container after changing them.
+
+Blocked keywords (`blocked_keywords`) are matched whatever the spacing, so a keyword written `deeppenetration`, `deep penetration`, or `Deep-Penetration` blocks all three spellings.
 
 ## Make Targets
 
