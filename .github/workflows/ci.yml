@@ -46,21 +46,29 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Compute next tag
+      - name: Read version and check tag
         id: version
+        shell: bash
         run: |
-          LATEST=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
-          if [ -z "$LATEST" ]; then LATEST="v0.0.0"; fi
-          MAJOR=$(echo $LATEST | cut -d. -f1 | tr -d v)
-          MINOR=$(echo $LATEST | cut -d. -f2)
-          PATCH=$(echo $LATEST | cut -d. -f3)
-          NEXT_PATCH=$((PATCH + 1))
-          NEW_TAG="v${MAJOR}.${MINOR}.${NEXT_PATCH}"
-          VERSION="${MAJOR}.${MINOR}.${NEXT_PATCH}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+          VERSION=$(tr -d '\r\n' < VERSION)
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::VERSION must contain a semantic version (major.minor.patch)"
+            exit 1
+          fi
+          TAG="v${VERSION}"
+          if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            RELEASE=false
+          else
+            RELEASE=true
+          fi
+          {
+            echo "version=$VERSION"
+            echo "tag=$TAG"
+            echo "release=$RELEASE"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create and push tag
+        if: steps.version.outputs.release == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -68,6 +76,7 @@ jobs:
           git push origin "${{ steps.version.outputs.tag }}"
 
       - name: Log in to GHCR
+        if: steps.version.outputs.release == 'true'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -75,9 +84,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Buildx
+        if: steps.version.outputs.release == 'true'
         uses: docker/setup-buildx-action@v4
 
       - name: Build and push
+        if: steps.version.outputs.release == 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
