@@ -216,7 +216,27 @@ def _format_iso_duration(value: object) -> str | None:
     return None
 
 
+def _has_store_connection(records: Mapping[str, object]) -> bool:
+    return any(
+        isinstance(record, dict)
+        and record.get("__typename") == "Profile"
+        and any(
+            isinstance(key, str) and key.startswith("storeVideos(") for key in record
+        )
+        for record in records.values()
+    )
+
+
 def _extract_record_map(html: str) -> dict[str, dict[str, object]] | None:
+    """Return the store recordMap from the isVideosStore RSC chunk.
+
+    One chunk can embed several recordMaps (a small profile-header map, the
+    store map, and non-dict references), in render order. Prefer the first
+    map whose Profile has a storeVideos connection; otherwise fall back to the
+    first dict map so the caller reports what is missing.
+    """
+    fallback: dict[str, dict[str, object]] | None = None
+    decoder = json.JSONDecoder()
     for match in _RSC_PATTERN.finditer(html):
         try:
             decoded = json.loads('"' + match.group(1) + '"')
@@ -224,16 +244,18 @@ def _extract_record_map(html: str) -> dict[str, dict[str, object]] | None:
             continue
         if not isinstance(decoded, str) or not _IS_VIDEOS_STORE.search(decoded):
             continue
-        record_map_match = _RECORD_MAP_KEY.search(decoded)
-        if record_map_match is None:
-            continue
-        try:
-            obj, _ = json.JSONDecoder().raw_decode(decoded, record_map_match.end())
-        except json.JSONDecodeError:
-            continue
-        if isinstance(obj, dict):
-            return obj
-    return None
+        for record_map_match in _RECORD_MAP_KEY.finditer(decoded):
+            try:
+                obj, _ = decoder.raw_decode(decoded, record_map_match.end())
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(obj, dict):
+                continue
+            if _has_store_connection(obj):
+                return obj
+            if fallback is None:
+                fallback = obj
+    return fallback
 
 
 def _deref(records: Mapping[str, object], link: object) -> dict[str, object] | None:

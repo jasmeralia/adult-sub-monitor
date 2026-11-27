@@ -44,6 +44,7 @@ def build_store_html(
     creator_id: str = "1002990973",
     include_mobile_connection: bool = True,
     include_handle_connections: bool = True,
+    header_record_map_first: bool = False,
 ) -> str:
     mobile = mobile or []
     records: dict[str, Any] = {
@@ -170,7 +171,7 @@ def build_store_html(
                     "mainSection": "STORE",
                     "subSection": "VIDEOS",
                 },
-                "children": ["$", "$L68", None, {"recordMap": records}],
+                "children": _children(records, creator_id, header_record_map_first),
             },
         ],
         separators=(",", ":"),
@@ -180,3 +181,32 @@ def build_store_html(
         + json.dumps(chunk)
         + "])</script></body></html>"
     )
+
+
+def _children(
+    records: dict[str, Any], creator_id: str, header_record_map_first: bool
+) -> list[object]:
+    store = ["$", "$L68", None, {"recordMap": records}]
+    if not header_record_map_first:
+        return store
+    # Live pages can render a small profile-header recordMap (no storeVideos)
+    # and a string reference before the store recordMap, all in one chunk.
+    header = {
+        "client:root": {
+            "__id": "client:root",
+            "__typename": "__Root",
+            f'profile(id:"{creator_id}")': {"__ref": "HDR1"},
+        },
+        "HDR1": {
+            "__id": "HDR1",
+            "__typename": "Profile",
+            "localId": creator_id,
+            "displayName": "Creator",
+            "bio": "",
+        },
+    }
+    return [
+        ["$", "$L69", None, {"recordMap": header}],
+        ["$", "$L6a", None, {"recordMap": "$6b"}],
+        store,
+    ]
