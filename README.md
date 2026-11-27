@@ -45,7 +45,7 @@ then mount only `data/db/` without exposing browser session state.
 |---|---|---|---|
 | `venus_platform` | `venus.angels.love`, `venus.sensual.love`, `venus.ultrafilms.com` | Required | Scrapes video listings, filters out photo sets, and fetches per-video detail pages for tags. |
 | `wowgirls_platform` | `venus.wowgirls.com` | Required | Uses an authenticated session and the WowGirls-specific updates listing. |
-| `manyvids` | Public ManyVids creator stores | Anonymous | Parses Relay store payloads and fetches per-video detail pages for tags. |
+| `manyvids` | Public ManyVids creator stores | Anonymous | Parses Relay store payloads, fetches per-video detail pages for tags, and re-scans each store every 72h (default) to record price changes. |
 
 ## Environment Variables
 
@@ -55,6 +55,7 @@ then mount only `data/db/` without exposing browser session state.
 | `DISCORD_WEBHOOK_URL` | Yes | Discord webhook used for video notifications. |
 | `<SITE>_USER` / `<SITE>_PASS` | For authenticated sites | Credentials matched by `credentials_env_user` and `credentials_env_pass`. Not used by ManyVids. |
 | `RUN_ONCE` | No | Set to `1` to run one check cycle and exit. |
+| `RUN_PRICE_REFRESH` | No | With `RUN_ONCE=1`, also run a full price re-scan for every ManyVids creator after the checks. |
 | `DRY_RUN` | No | Set to `1` to skip DB writes and Discord notifications. |
 | `LOG_LEVEL` | No | Override log level. Defaults to `INFO`. |
 | `MANYVIDS_TAG_WORDS` | No | Comma-separated ManyVids tag word entries layered over the shipped defaults (see [Tag formatting](#manyvids-tag-formatting)). |
@@ -80,6 +81,41 @@ Entry forms:
 The lists are read once at startup, so restart the container after changing them.
 
 Blocked keywords (`blocked_keywords`) are matched whatever the spacing, so a keyword written `deeppenetration`, `deep penetration`, or `Deep-Penetration` blocks all three spellings.
+
+## ManyVids price tracking
+
+The monitor records each ManyVids video's current effective price and list
+price, plus change-only observations in SQLite. It does not send price-drop
+notifications. Each creator is fully re-scanned every 72 hours by default;
+first scans are staggered after startup, page loads use the configured page
+delays, and creators are paced using `delay_between_creators_min` and
+`delay_between_creators_max`.
+
+The `manyvids` config block supports:
+
+| Key | Default | Purpose |
+|---|---:|---|
+| `price_refresh_enabled` | `true` | Enable scheduled full-store price scans. |
+| `price_refresh_interval_hours` | `72` | Hours between successful refresh cycles per creator. |
+| `price_refresh_jitter_seconds` | `21600` | Maximum scheduler jitter. |
+| `price_refresh_stagger_seconds` | `600` | Added spacing between creators' first scheduled scans. |
+
+Consumers can derive sale state from the observation history. A current price
+below list price is a list-price sale; otherwise a price below the 90-day high
+is a price drop, then a price below first seen is a historical low. See
+[`docs/DESIGN.md`](docs/DESIGN.md#price-tracking-manyvids) for the rules and
+reference SQL.
+
+Before upgrading to schema v2, stop the service and back up the database outside
+`data/db/`:
+
+```sh
+sqlite3 data/db/monitor.db ".backup '/some/other/dir/monitor.db.pre-v2'"
+```
+
+Start the new image and check for the `Database migrated to schema v2` log
+line, then run the read-only verification queries in
+[`docs/DESIGN.md`](docs/DESIGN.md#price-tracking-manyvids).
 
 ## Make Targets
 

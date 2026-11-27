@@ -1,12 +1,27 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 _MANYVIDS_URL = re.compile(r"^https?://(?:www\.)?manyvids\.com/", re.IGNORECASE)
 _MANYVIDS_VIDEO_ID = re.compile(
     r"^https?://(?:www\.)?manyvids\.com/Video/(\d+)(?:[/?#]|$)", re.IGNORECASE
 )
+
+
+@dataclass(frozen=True)
+class PriceObservation:
+    video_id: str
+    price_cents: int
+    list_price_cents: int | None
+
+
+@dataclass(frozen=True)
+class PriceScanSummary:
+    matched: int
+    changed: int
+    unmatched: int
 
 
 def parse_price_cents(text: str | None) -> int | None:

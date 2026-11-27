@@ -37,3 +37,15 @@ async def test_auth_defaults_are_no_ops() -> None:
     assert site.init_scripts() == []
     assert await site.is_logged_in(AsyncMock()) is True
     assert await site.login(AsyncMock(), "user", "pass") is None
+
+
+@pytest.mark.asyncio
+async def test_price_tracking_defaults() -> None:
+    class MinimalSite(BaseSite):
+        async def get_latest_items(self, page) -> list:
+            return []
+
+    site = MinimalSite()
+    assert site.tracks_prices is False
+    assert site.price_scope() is None
+    assert await site.refresh_prices(AsyncMock(), AsyncMock()) is None

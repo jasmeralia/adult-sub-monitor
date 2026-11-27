@@ -24,7 +24,7 @@ Use spaces only, no tabs. Do not leave trailing whitespace. Linting runs through
 
 `config.py` defines the Pydantic application and site configuration models, including per-site credential environment variable names and runtime defaults.
 
-`db.py` owns the SQLite layer, applies idempotent migrations, enables WAL mode, tracks seen items, and records failed notifications for retry.
+`db.py` owns the SQLite layer, applies idempotent `PRAGMA user_version` migrations, enables WAL mode, tracks seen items by numeric ManyVids video ID, records price history, and stores failed notifications for retry.
 
 `discord.py` builds and sends Discord webhook embeds for newly detected videos, handles webhook failures, and respects rate limiting.
 
@@ -38,7 +38,7 @@ Use spaces only, no tabs. Do not leave trailing whitespace. Linting runs through
 
 `pricing.py` parses prices and ManyVids video IDs, and maps ManyVids list and sale prices.
 
-`main.py` orchestrates config loading, logging, scheduling, per-site checks, deduplication, notifications, retry handling, and graceful shutdown.
+`main.py` orchestrates config loading, logging, per-site checks, price refresh scheduling, deduplication, notifications, retry handling, and graceful shutdown.
 
 ## 6. Adding a new site
 
@@ -46,6 +46,7 @@ Use spaces only, no tabs. Do not leave trailing whitespace. Linting runs through
 2. Register it in `_build_site()`.
 3. Add tests mocking browser interactions.
 4. Update the README sites table.
+5. For per-item-priced sites with price history, set `tracks_prices = True` and implement `price_scope()`/`refresh_prices()`.
 
 Use the `BaseSite` hooks when a site differs from the authenticated default: set `requires_auth = False` for anonymous sites, override `context_options()` for browser context kwargs, and override `init_scripts()` for context init scripts.
 

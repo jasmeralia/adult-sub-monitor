@@ -87,11 +87,19 @@ sites:
 manyvids:
   delay_between_creators_min: 30
   delay_between_creators_max: 60
+  creator_interval_hours: 12
+  creator_jitter_seconds: 21600
   delay_between_pages_min: 3
   delay_between_pages_max: 8
   page_timeout: 30000
   max_retries: 3
   retry_backoff_base: 10
+  # Full store re-scan to record price changes; every N hours with jitter;
+  # first scans after startup are spaced price_refresh_stagger_seconds apart.
+  price_refresh_enabled: true
+  price_refresh_interval_hours: 72
+  price_refresh_jitter_seconds: 21600
+  price_refresh_stagger_seconds: 600
   user_agent: >-
     Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
     (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36

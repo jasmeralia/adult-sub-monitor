@@ -17,6 +17,7 @@ class BaseSite(ABC):
     listing_url: str
     has_interstitial: bool = False
     requires_auth: bool = True
+    tracks_prices: bool = False
 
     def context_options(self) -> dict[str, object]:
         return {}
@@ -29,6 +30,16 @@ class BaseSite(ABC):
 
     async def dismiss_interstitial(self, _page: Page) -> bool:
         return False
+
+    def price_scope(self) -> tuple[str, str] | None:
+        """Return the refresh-state key, or None when price tracking is inactive."""
+        return None
+
+    async def refresh_prices(
+        self, _page: Page, _db: "Database", *, dry_run: bool = False
+    ) -> None:
+        del dry_run
+        return None
 
     async def is_logged_in(self, _page: Page) -> bool:
         return True

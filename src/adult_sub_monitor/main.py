@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import signal
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -34,9 +35,105 @@ from adult_sub_monitor.tags import configure_tag_overrides, load_tag_overrides
 
 logger = logging.getLogger(__name__)
 _site_locks: dict[str, asyncio.Lock] = {}
+_PRICE_REFRESH_STARTUP_DELAY_SECONDS = 600
+_price_refresh_lock: asyncio.Lock | None = None  # pylint: disable=invalid-name
 
 
 _DEFAULT_JITTER_SECONDS = 900
+
+
+def _get_price_refresh_lock() -> asyncio.Lock:
+    global _price_refresh_lock  # pylint: disable=global-statement
+    if _price_refresh_lock is None:
+        _price_refresh_lock = asyncio.Lock()
+    return _price_refresh_lock
+
+
+def _price_refresh_initial_delay_seconds(
+    last_success: datetime | None,
+    now_utc: datetime,
+    interval_hours: float,
+    index: int,
+    stagger_seconds: int,
+) -> float:
+    remaining = 0.0
+    if last_success is not None:
+        remaining = max(
+            0.0,
+            (last_success + timedelta(hours=interval_hours) - now_utc).total_seconds(),
+        )
+    return remaining + _PRICE_REFRESH_STARTUP_DELAY_SECONDS + index * stagger_seconds
+
+
+async def _refresh_site_prices(
+    site: BaseSite,
+    site_config: SiteConfig,
+    browser_manager: BrowserManager,
+    db: Database,
+    scraping: ManyVidsScrapingConfig,
+    dry_run: bool,
+) -> None:
+    if not site.tracks_prices:
+        return
+    async with _get_price_refresh_lock():
+        lock = _site_locks.setdefault(site.name, asyncio.Lock())
+        async with lock:
+            logger.info("Refreshing prices for %s", site.name)
+            context = await browser_manager.ensure_authenticated(site, site_config)
+            try:
+                page = await context.new_page()
+                try:
+                    await site.refresh_prices(page, db, dry_run=dry_run)
+                finally:
+                    await page.close()
+            finally:
+                await context.close()
+        delay = random.uniform(
+            scraping.delay_between_creators_min,
+            scraping.delay_between_creators_max,
+        )
+        logger.debug("Waiting %.1fs before the next price refresh", delay)
+        await asyncio.sleep(delay)
+
+
+async def _schedule_price_refresh_jobs(
+    scheduler: AsyncIOScheduler,
+    active: list[tuple[SiteConfig, BaseSite]],
+    scraping: ManyVidsScrapingConfig,
+    browser_manager: BrowserManager,
+    db: Database,
+    dry_run: bool,
+    now_local: datetime,
+    now_utc: datetime,
+) -> int:
+    if not scraping.price_refresh_enabled:
+        return 0
+    tracking_sites = [(config, site) for config, site in active if site.tracks_prices]
+    for index, (site_config, site) in enumerate(tracking_sites):
+        scope = site.price_scope()
+        last = await db.get_price_refresh_last_success(*scope) if scope else None
+        delay = _price_refresh_initial_delay_seconds(
+            last,
+            now_utc,
+            scraping.price_refresh_interval_hours,
+            index,
+            scraping.price_refresh_stagger_seconds,
+        )
+        scheduler.add_job(
+            _refresh_site_prices,
+            trigger=IntervalTrigger(
+                hours=scraping.price_refresh_interval_hours,
+                jitter=scraping.price_refresh_jitter_seconds,
+                start_date=now_local + timedelta(seconds=delay),
+            ),
+            args=[site, site_config, browser_manager, db, scraping, dry_run],
+            id=f"price-refresh-{site.name}",
+            name=f"price-refresh-{site.name}",
+            max_instances=1,
+            replace_existing=True,
+        )
+    logger.info("Scheduled %s price refresh jobs", len(tracking_sites))
+    return len(tracking_sites)
 
 
 def _build_site(site_config: SiteConfig) -> BaseSite:
@@ -252,7 +349,7 @@ async def _check_site(
             await context.close()
 
 
-async def run() -> None:
+async def run() -> None:  # pylint: disable=too-many-locals
     config = load_config(Path(os.environ.get("CONFIG_PATH", "/config/config.yaml")))
 
     logging.basicConfig(level=config.log_level)
@@ -268,6 +365,7 @@ async def run() -> None:
     webhook_url = os.environ.get(config.discord_webhook_env, config.discord_webhook_env)
     run_once = os.environ.get("RUN_ONCE") == "1"
     dry_run = os.environ.get("DRY_RUN") == "1"
+    scraping = config.manyvids or ManyVidsScrapingConfig()
     active = _build_active_sites(config)
     configure_tag_overrides(load_tag_overrides())
     keyword_patterns = compile_blocked_keywords(config.blocked_keywords)
@@ -284,6 +382,16 @@ async def run() -> None:
                     dry_run,
                     keyword_patterns,
                 )
+            if os.environ.get("RUN_PRICE_REFRESH") == "1":
+                for site_config, site in active:
+                    await _refresh_site_prices(
+                        site,
+                        site_config,
+                        browser_manager,
+                        db,
+                        scraping,
+                        dry_run,
+                    )
             return
 
         shutdown_event = asyncio.Event()
@@ -312,6 +420,17 @@ async def run() -> None:
                 max_instances=1,
                 replace_existing=True,
             )
+
+        await _schedule_price_refresh_jobs(
+            scheduler,
+            active,
+            scraping,
+            browser_manager,
+            db,
+            dry_run,
+            now,
+            datetime.now(UTC),
+        )
 
         def handle_sigterm() -> None:
             logger.info("Received SIGTERM; shutting down scheduler")

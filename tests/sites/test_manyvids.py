@@ -595,8 +595,7 @@ async def test_get_latest_items_populates_manyvids_metadata() -> None:
     site = _site()
     page = AsyncMock()
     db = AsyncMock()
-    db.get_known_titles = AsyncMock(return_value=set())
-    db.get_known_item_ids = AsyncMock(return_value=set())
+    db.get_known_video_ids = AsyncMock(return_value=set())
     video = VideoData(
         video_id="101",
         title="First Video",
@@ -644,10 +643,13 @@ async def test_get_latest_items_populates_manyvids_metadata() -> None:
             video_type="mobile",
             creator="Creator Name",
             description="A short description.",
+            video_id="101",
+            pricing_model="per_video",
+            price_cents=599,
+            list_price_cents=599,
         )
     ]
-    db.get_known_titles.assert_awaited_once_with("ManyVids")
-    db.get_known_item_ids.assert_awaited_once_with("ManyVids")
+    db.get_known_video_ids.assert_awaited_once_with("ManyVids")
 
 
 def test_requires_auth_is_false() -> None:
@@ -685,6 +687,55 @@ async def test_fetch_video_details_reads_tags_without_per_element_waits() -> Non
     )
 
     assert tags == ["POV Blowjob", "Nylons"]
+
+
+@pytest.mark.asyncio
+async def test_get_latest_items_skips_known_ids_not_titles() -> None:
+    site = _site()
+    db = AsyncMock()
+    db.get_known_video_ids = AsyncMock(return_value={"101"})
+    videos = [
+        VideoData(
+            "101",
+            "Same Title",
+            "old",
+            "https://www.manyvids.com/Video/101/old",
+            "regular",
+            None,
+            "5.99",
+            "02:00",
+        ),
+        VideoData(
+            "102",
+            "Same Title",
+            "new",
+            "https://www.manyvids.com/Video/102/new",
+            "mobile",
+            None,
+            "5.99",
+            "02:00",
+        ),
+    ]
+    with (
+        patch.object(
+            site,
+            "scrape_creator_with_retry",
+            new=AsyncMock(
+                return_value=CreatorResult(
+                    creator_id="1002990973",
+                    creator_name="creator_slug",
+                    videos=videos,
+                    total_pages=1,
+                )
+            ),
+        ),
+        patch.object(
+            site, "_fetch_video_details", new=AsyncMock(return_value=([], None))
+        ) as details,
+    ):
+        items = await site.get_latest_items(AsyncMock(), db)
+    assert [item.video_id for item in items] == ["102"]
+    assert details.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -774,54 +825,95 @@ async def test_full_scan_empty_store_succeeds() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_latest_items_early_stops_on_ids_and_filters_on_titles() -> None:
+async def test_refresh_prices_records_observations_on_success() -> None:
+    from adult_sub_monitor.pricing import PriceObservation
+
     site = _site()
-    db = AsyncMock()
-    db.get_known_titles = AsyncMock(return_value={"Known Title"})
-    db.get_known_item_ids = AsyncMock(
-        return_value={
-            "https://www.manyvids.com/Video/101/old-slug",
-            "https://www.manyvids.com/Profile/1/not-a-video",
-        }
-    )
     videos = [
         VideoData(
-            "101",
-            "Known Title",
-            "old-slug",
-            "https://www.manyvids.com/Video/101/old-slug",
+            "1",
+            "one",
+            "one",
+            "https://www.manyvids.com/Video/1/one",
             "regular",
             None,
             "5.99",
-            "02:00",
+            None,
+            599,
+            999,
         ),
         VideoData(
-            "102",
-            "New Title",
-            "new",
-            "https://www.manyvids.com/Video/102/new",
+            "2",
+            "two",
+            "two",
+            "https://www.manyvids.com/Video/2/two",
             "mobile",
             None,
-            "5.99",
-            "02:00",
+            None,
+            None,
+            None,
+            None,
+        ),
+        VideoData(
+            "3",
+            "three",
+            "three",
+            "https://www.manyvids.com/Video/3/three",
+            "regular",
+            None,
+            "4.99",
+            None,
+            499,
+            499,
         ),
     ]
-    scrape = AsyncMock(
-        return_value=CreatorResult(
-            creator_id="1002990973",
-            creator_name="creator_slug",
-            videos=videos,
-            total_pages=1,
-        )
+    result = CreatorResult("1002990973", "creator_slug", videos, 2)
+    db = AsyncMock()
+    page = AsyncMock()
+    with patch.object(
+        site, "scrape_creator_with_retry", new=AsyncMock(return_value=result)
+    ) as scrape:
+        await site.refresh_prices(page, db)
+    scrape.assert_awaited_once_with(page, site.creator, set(), full_scan=True)
+    db.record_price_scan.assert_awaited_once_with(
+        "ManyVids",
+        "1002990973",
+        [PriceObservation("1", 599, 999), PriceObservation("3", 499, 499)],
     )
-    with (
-        patch.object(site, "scrape_creator_with_retry", new=scrape),
-        patch.object(
-            site, "_fetch_video_details", new=AsyncMock(return_value=([], None))
-        ) as details,
-    ):
-        items = await site.get_latest_items(AsyncMock(), db)
 
-    assert scrape.await_args.args[2] == {"101"}
-    assert [item.title for item in items] == ["New Title"]
-    details.assert_awaited_once()
+
+@pytest.mark.asyncio
+async def test_refresh_prices_records_nothing_on_failed_scan() -> None:
+    site = _site()
+    db = AsyncMock()
+    result = CreatorResult("1002990973", "creator_slug", [], 0, error="failed")
+    with patch.object(
+        site, "scrape_creator_with_retry", new=AsyncMock(return_value=result)
+    ):
+        await site.refresh_prices(AsyncMock(), db)
+    db.record_price_scan.assert_not_awaited()
+    db.record_price_scan_failure.assert_awaited_once_with(
+        "ManyVids", "1002990973", "failed"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed", [False, True])
+async def test_refresh_prices_dry_run_writes_nothing(failed: bool) -> None:
+    site = _site()
+    db = AsyncMock()
+    result = CreatorResult(
+        "1002990973", "creator_slug", [], 0, error="failed" if failed else None
+    )
+    with patch.object(
+        site, "scrape_creator_with_retry", new=AsyncMock(return_value=result)
+    ):
+        await site.refresh_prices(AsyncMock(), db, dry_run=True)
+    db.record_price_scan.assert_not_awaited()
+    db.record_price_scan_failure.assert_not_awaited()
+
+
+def test_manyvids_tracks_prices_and_price_scope() -> None:
+    site = _site()
+    assert site.tracks_prices is True
+    assert site.price_scope() == ("ManyVids", "1002990973")

@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
+PricingModel = Literal["per_video", "subscription"]
+
 
 class Item(BaseModel):
     site_name: str
@@ -17,6 +19,10 @@ class Item(BaseModel):
     video_type: str | None = None
     creator: str | None = None
     description: str | None = None
+    video_id: str | None = None
+    pricing_model: PricingModel = "subscription"
+    price_cents: int | None = None
+    list_price_cents: int | None = None
 
 
 class ManyVidsCreator(BaseModel):
@@ -41,6 +47,10 @@ class ManyVidsScrapingConfig(BaseModel):
     )
     creator_interval_hours: float = 12.0
     creator_jitter_seconds: int = 21600
+    price_refresh_enabled: bool = True
+    price_refresh_interval_hours: float = Field(default=72.0, gt=0)
+    price_refresh_jitter_seconds: int = Field(default=21600, ge=0)
+    price_refresh_stagger_seconds: int = Field(default=600, ge=0)
 
 
 class SiteConfig(BaseModel):

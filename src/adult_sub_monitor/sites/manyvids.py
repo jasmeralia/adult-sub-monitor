@@ -25,10 +25,7 @@ from adult_sub_monitor.models import (
     ManyVidsScrapingConfig,
     SiteConfig,
 )
-from adult_sub_monitor.pricing import (
-    manyvids_video_id_from_url,
-    resolve_manyvids_price,
-)
+from adult_sub_monitor.pricing import PriceObservation, resolve_manyvids_price
 from adult_sub_monitor.sites.base import BaseSite
 from adult_sub_monitor.tags import format_tag
 
@@ -444,6 +441,7 @@ def _extract_tags_from_html(html: str) -> list[str]:
 
 class ManyVidsSite(BaseSite):
     requires_auth = False
+    tracks_prices = True
 
     def __init__(
         self,
@@ -468,18 +466,56 @@ class ManyVidsSite(BaseSite):
     def init_scripts(self) -> list[str]:
         return [WEBDRIVER_MASK_SCRIPT]
 
+    def price_scope(self) -> tuple[str, str]:
+        return self.display_name, self.creator.creator_id
+
+    async def refresh_prices(
+        self, page: Page, db: Database, *, dry_run: bool = False
+    ) -> None:
+        creator = self.creator
+        result = await self.scrape_creator_with_retry(
+            page, creator, set(), full_scan=True
+        )
+        if result.error:
+            logger.error(
+                "Creator %s: price refresh failed; no observations recorded: %s",
+                creator.creator_name,
+                result.error,
+            )
+            if not dry_run:
+                await db.record_price_scan_failure(
+                    self.display_name, creator.creator_id, result.error
+                )
+            return
+        observations = [
+            PriceObservation(video.video_id, video.price_cents, video.list_price_cents)
+            for video in result.videos
+            if video.price_cents is not None
+        ]
+        skipped = len(result.videos) - len(observations)
+        if dry_run:
+            logger.info(
+                "DRY_RUN: would record %s price observations for creator %s",
+                len(observations),
+                creator.creator_name,
+            )
+            return
+        summary = await db.record_price_scan(
+            self.display_name, creator.creator_id, observations
+        )
+        logger.info(
+            "Creator %s: price refresh matched=%s changed=%s unmatched=%s no_price=%s",
+            creator.creator_name,
+            summary.matched,
+            summary.changed,
+            summary.unmatched,
+            skipped,
+        )
+
     async def get_latest_items(
         self, page: Page, db: Database | None = None
     ) -> list[Item]:
-        known_titles = await db.get_known_titles(self.display_name) if db else set()
-        # Notifications still dedupe on titles until IDs are stored (Odoo #590);
-        # numeric IDs parsed from stored URLs only drive the pagination early stop.
-        known_item_ids = await db.get_known_item_ids(self.display_name) if db else set()
-        known_ids = {
-            video_id
-            for item_id in known_item_ids
-            if (video_id := manyvids_video_id_from_url(item_id)) is not None
-        }
+        known_ids = await db.get_known_video_ids(self.display_name) if db else set()
         items: list[Item] = []
         creator = self.creator
         result = await self.scrape_creator_with_retry(page, creator, known_ids)
@@ -493,7 +529,7 @@ class ManyVidsSite(BaseSite):
 
         creator_name = creator.display_name or creator.creator_name
         for video in result.videos:
-            if video.title in known_titles:
+            if video.video_id in known_ids:
                 continue
             tags, description = await self._fetch_video_details(page, video.url)
             items.append(
@@ -509,6 +545,10 @@ class ManyVidsSite(BaseSite):
                     price=video.price_regular,
                     video_type=video.video_type,
                     creator=creator_name,
+                    video_id=video.video_id,
+                    pricing_model="per_video",
+                    price_cents=video.price_cents,
+                    list_price_cents=video.list_price_cents,
                 )
             )
 
