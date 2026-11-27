@@ -45,7 +45,7 @@ then mount only `data/db/` without exposing browser session state.
 |---|---|---|---|
 | `venus_platform` | `venus.angels.love`, `venus.sensual.love`, `venus.ultrafilms.com` | Required | Scrapes video listings, filters out photo sets, and fetches per-video detail pages for tags. |
 | `wowgirls_platform` | `venus.wowgirls.com` | Required | Uses an authenticated session and the WowGirls-specific updates listing. |
-| `manyvids` | Public ManyVids creator stores | Anonymous | Scrapes configured creator stores and fetches per-video detail pages for tags. |
+| `manyvids` | Public ManyVids creator stores | Anonymous | Parses Relay store payloads and fetches per-video detail pages for tags. |
 
 ## Environment Variables
 
@@ -59,6 +59,7 @@ then mount only `data/db/` without exposing browser session state.
 | `LOG_LEVEL` | No | Override log level. Defaults to `INFO`. |
 | `MANYVIDS_TAG_WORDS` | No | Comma-separated ManyVids tag word entries layered over the shipped defaults (see [Tag formatting](#manyvids-tag-formatting)). |
 | `MANYVIDS_TAG_WORDS_FILE` | No | Path to a tag word override file. Defaults to `/config/manyvids_tag_words.txt`; ignored if the file does not exist. Layered over the shipped defaults. |
+| `MANYVIDS_DEBUG_DUMP_DIR` | No | Optional directory; when set, store pages whose payload cannot be parsed are saved there as HTML for debugging. |
 
 ## ManyVids Tag Formatting
 

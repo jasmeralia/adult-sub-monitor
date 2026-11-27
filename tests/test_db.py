@@ -155,6 +155,15 @@ async def test_get_known_titles_returns_titles_for_site(db: Database) -> None:
     assert await db.get_known_titles("site_one") == {"Test Item 1", "Test Item 2"}
 
 
+@pytest.mark.asyncio
+async def test_get_known_item_ids_returns_item_ids_for_site(db: Database) -> None:
+    await db.mark_seen(build_item(site_name="site_one", item_id="1"))
+    await db.mark_seen(build_item(site_name="site_one", item_id="2"))
+    await db.mark_seen(build_item(site_name="site_two", item_id="3"))
+
+    assert await db.get_known_item_ids("site_one") == {"1", "2"}
+
+
 def test_reopening_database_applies_migrations_idempotently(tmp_db_path: Path) -> None:
     db = Database(tmp_db_path)
     db.conn.close()

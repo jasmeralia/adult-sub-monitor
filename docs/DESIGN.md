@@ -82,6 +82,7 @@ adult-sub-monitor/
 │       ├── db.py                 # SQLite layer
 │       ├── discord.py            # Webhook notifier
 │       ├── config.py             # Pydantic config models
+│       ├── pricing.py            # Price parsing and ManyVids URL helpers
 │       ├── models.py             # Domain types (Item, Site, etc.)
 │       ├── tags.py               # Tag word splitting + capitalization
 │       ├── data/tag_words.txt    # Shipped default tag word list
@@ -99,6 +100,7 @@ adult-sub-monitor/
 │   ├── test_config.py
 │   ├── test_browser.py
 │   ├── test_main.py
+│   ├── test_pricing.py
 │   └── sites/
 │       ├── __init__.py
 │       ├── test_base.py
@@ -214,14 +216,22 @@ selectors.
 **`sites/manyvids.py` — ManyVidsSite**
 
 Anonymous public creator-store scraper. A single `manyvids` site config contains
-one or more creators. The scraper handles regular and mobile store pagination,
-early-stop behavior against known titles, retry/backoff for blocked or failed
-creator scrapes, per-video detail-page tag extraction, and metadata enrichment
-for creator, type, duration, and price. It overrides `requires_auth`,
-`context_options()`, and `init_scripts()` to run without stored credentials and
-with ManyVids-specific browser context settings. The `og:description` meta
-content is read with a quote-aware pattern so apostrophes in descriptions are
-kept, and tags are passed through `tags.format_tag`.
+one or more creators. Store pages are parsed from the embedded Relay
+`recordMap`, following the regular (70 items) and mobile (14 items)
+`storeVideos` connections. Both connections use `?page=N`; `totalCount` and
+connection page sizes determine how many pages to load. Video type comes from
+the connection. The pagination early stop uses known numeric video IDs parsed
+from stored item URLs, while new-video detection still matches known titles
+until IDs are stored per row. An unparseable store payload raises an error and
+is retried instead of being treated as an empty page. Set
+`MANYVIDS_DEBUG_DUMP_DIR` to save such pages as HTML for debugging. The scraper
+also handles retry/backoff for blocked or failed creator scrapes, per-video
+detail-page tag extraction, and metadata enrichment for creator, type,
+duration, and price. It overrides `requires_auth`, `context_options()`, and
+`init_scripts()` to run without stored credentials and with ManyVids-specific
+browser context settings. The `og:description` meta content is read with a
+quote-aware pattern so apostrophes in descriptions are kept, and tags are
+passed through `tags.format_tag`.
 
 **`tags.py` — tag formatting**
 
@@ -416,6 +426,7 @@ mount only `data/db/` without exposing browser session state.
 | `LOG_LEVEL`               | `INFO`                   | Override log level                       |
 | `MANYVIDS_TAG_WORDS`      | unset                    | Comma-separated tag words, layered over defaults |
 | `MANYVIDS_TAG_WORDS_FILE` | `/config/manyvids_tag_words.txt` | Tag word file, layered over defaults (optional) |
+| `MANYVIDS_DEBUG_DUMP_DIR` | unset                    | Optional directory for unparseable ManyVids store-page HTML dumps |
 
 ---
 
@@ -626,6 +637,7 @@ services:
 | `config.py`                     | `tests/test_config.py`                 | YAML fixtures, Pydantic validation     |
 | `browser.py`                    | `tests/test_browser.py`                | `AsyncMock` for Playwright objects     |
 | `main.py`                       | `tests/test_main.py`                   | Mocked scheduler, mocked sites         |
+| `pricing.py`                    | `tests/test_pricing.py`                | Pure price and ManyVids URL helpers    |
 | `tags.py`                       | `tests/test_tags.py`                   | Pure functions, env/file loading       |
 | `sites/base.py`                 | `tests/sites/test_base.py`             | Concrete test subclass                 |
 | `sites/manyvids.py`             | `tests/sites/test_manyvids.py`         | HTML fixtures + AsyncMock pages        |
@@ -664,10 +676,10 @@ services:
 - Title/thumbnail/performers/tags extracted correctly
 
 **`test_manyvids.py`**
-- RSC payload extraction for regular/mobile store pages
-- DOM enrichment of video type and thumbnails
+- Relay `recordMap` parsing for regular/mobile videos, prices, duration and thumbnails
+- Pagination, ID-based early stop and full-scan validation
+- Unparseable payload retries and optional HTML debug dumps
 - Detail-page tag extraction strips leading `#`
-- Early-stop behavior when all page titles are already known
 - Retry/backoff behavior for blocked or failed creator scrapes
 - Anonymous `BaseSite` hooks and item metadata mapping
 
@@ -676,6 +688,10 @@ services:
 - `DRY_RUN=1` skips DB writes and notifications
 - Per-site lock prevents overlapping runs
 - New item triggers notification; duplicate does not
+
+**`test_pricing.py`**
+- Dollar strings parse to cents with half-up rounding
+- ManyVids sale/free mappings and numeric ID extraction
 
 ---
 

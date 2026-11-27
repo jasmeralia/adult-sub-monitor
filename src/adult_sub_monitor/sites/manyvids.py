@@ -4,10 +4,15 @@ import asyncio
 import html as html_module
 import json
 import logging
+import os
 import random
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from html.parser import HTMLParser
+from math import ceil
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
@@ -19,6 +24,10 @@ from adult_sub_monitor.models import (
     ManyVidsCreator,
     ManyVidsScrapingConfig,
     SiteConfig,
+)
+from adult_sub_monitor.pricing import (
+    manyvids_video_id_from_url,
+    resolve_manyvids_price,
 )
 from adult_sub_monitor.sites.base import BaseSite
 from adult_sub_monitor.tags import format_tag
@@ -38,23 +47,15 @@ TAGS_SELECTOR = (
 )
 
 _RSC_PATTERN = re.compile(r'self\.__next_f\.push\(\[1,"(.*?)"\]\)', re.DOTALL)
-_VIDEO_PATTERN = re.compile(
-    r'\{"id":"(\d+)"'
-    r',"title":"(.*?)"'
-    r'.*?"slug":"([^"]+)"'
-    r'.*?"thumbnail":\{"url":"([^"]+)"\}'
-    r'.*?"regular":"([^"]*)"'
-    r'.*?"type":"([^"]+)"'
-    r'.*?"duration":"([^"]*)"',
-    re.DOTALL,
+_RECORD_MAP_KEY = re.compile(r'"recordMap"\s*:\s*')
+_IS_VIDEOS_STORE = re.compile(r'"isVideosStore"\s*:\s*true')
+_FIRST_ARG = re.compile(r"\bfirst:(\d+)")
+_ISO_DURATION = re.compile(
+    r"^PT(?:(?P<h>\d+)H)?(?:(?P<m>\d+)M)?(?:(?P<s>\d+(?:\.\d+)?)S)?$"
 )
-_TOTAL_PAGES_PATTERN = re.compile(r'"totalPages":(\d+)')
-_CARD_PATTERN = re.compile(
-    r"(?P<section>VerticalVideosSection|HorizontalVideosSection)[\s\S]{0,2000}?"
-    r'aria-label="(?P<title>[^"]+?) by [^"]+ on ManyVids\."[\s\S]{0,2000}?'
-    r'<img [^>]*?src="(?P<img>[^"]+)"',
-    re.DOTALL,
-)
+_CLOCK_DURATION = re.compile(r"^\d{1,2}(?::\d{2}){1,2}$")
+_MAX_STORE_PAGES = 200
+DEBUG_DUMP_ENV = "MANYVIDS_DEBUG_DUMP_DIR"
 
 
 @dataclass
@@ -67,6 +68,35 @@ class VideoData:  # pylint: disable=too-many-instance-attributes
     thumbnail_url: str | None
     price_regular: str | None
     duration: str | None
+    price_cents: int | None = None
+    list_price_cents: int | None = None
+
+
+@dataclass
+class StorePage:
+    videos: list[VideoData]
+    regular_total: int
+    regular_page_size: int
+    mobile_total: int
+    mobile_page_size: int
+
+    @property
+    def total_pages(self) -> int:
+        regular_pages = (
+            ceil(self.regular_total / self.regular_page_size)
+            if self.regular_page_size
+            else 0
+        )
+        mobile_pages = (
+            ceil(self.mobile_total / self.mobile_page_size)
+            if self.mobile_page_size
+            else 0
+        )
+        return max(regular_pages, mobile_pages, 1)
+
+    @property
+    def expected_total(self) -> int:
+        return self.regular_total + self.mobile_total
 
 
 @dataclass
@@ -87,6 +117,10 @@ class ScraperBlockedError(ScraperError):
 
 
 class ScraperNotFoundError(ScraperError):
+    pass
+
+
+class StorePayloadError(ScraperError):
     pass
 
 
@@ -162,89 +196,222 @@ def _normalize_tag(text: str) -> str | None:
     return format_tag(normalized)
 
 
-def _build_page_url(
-    creator_id: str, creator_name: str, page: int, vertical: int
-) -> str:
+def _format_iso_duration(value: object) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    match = _ISO_DURATION.fullmatch(value)
+    if match and value != "PT":
+        hours = int(match.group("h") or 0)
+        minutes = int(match.group("m") or 0)
+        seconds = int(float(match.group("s") or 0))
+        total_seconds = hours * 3600 + minutes * 60 + seconds
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes:02d}:{seconds:02d}"
+    if _CLOCK_DURATION.fullmatch(value):
+        return value
+    logger.debug("Unrecognized ManyVids duration: %r", value)
+    return None
+
+
+def _extract_record_map(html: str) -> dict[str, dict[str, object]] | None:
+    for match in _RSC_PATTERN.finditer(html):
+        try:
+            decoded = json.loads('"' + match.group(1) + '"')
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(decoded, str) or not _IS_VIDEOS_STORE.search(decoded):
+            continue
+        record_map_match = _RECORD_MAP_KEY.search(decoded)
+        if record_map_match is None:
+            continue
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(decoded, record_map_match.end())
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return None
+
+
+def _deref(records: Mapping[str, object], link: object) -> dict[str, object] | None:
+    if not isinstance(link, dict) or not isinstance(link.get("__ref"), str):
+        return None
+    record = records.get(link["__ref"])
+    return record if isinstance(record, dict) else None
+
+
+def _parse_store_page(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+    html: str,
+) -> StorePage:
+    records = _extract_record_map(html)
+    if records is None:
+        raise StorePayloadError("ManyVids store recordMap not found in page HTML")
+    root = records.get("client:root")
+    profile = None
+    if isinstance(root, dict):
+        for key, value in root.items():
+            if isinstance(key, str) and key.startswith("profile("):
+                profile = _deref(records, value)
+                if profile is not None:
+                    break
+    if profile is None:
+        profile = next(
+            (
+                record
+                for record in records.values()
+                if isinstance(record, dict) and record.get("__typename") == "Profile"
+            ),
+            None,
+        )
+    if profile is None:
+        raise StorePayloadError("ManyVids store payload has no Profile record")
+
+    regular: tuple[str, dict[str, object]] | None = None
+    mobile: tuple[str, dict[str, object]] | None = None
+    for key, value in profile.items():
+        if not isinstance(key, str) or not key.startswith("storeVideos("):
+            continue
+        connection = _deref(records, value)
+        if connection is None:
+            continue
+        if '"vertical":true' in key:
+            if mobile is None:
+                mobile = (key, connection)
+        elif regular is None:
+            regular = (key, connection)
+    if regular is None:
+        raise StorePayloadError("ManyVids store payload has no storeVideos connection")
+
+    videos: list[VideoData] = []
+    totals: dict[str, int] = {"regular": 0, "mobile": 0}
+    sizes: dict[str, int] = {"regular": 0, "mobile": 0}
+    for video_type, entry in (("regular", regular), ("mobile", mobile)):
+        if entry is None:
+            continue
+        key, connection = entry
+        raw_total = connection.get("totalCount")
+        try:
+            total = int(raw_total) if isinstance(raw_total, (int, str)) else 0
+        except ValueError as exc:
+            raise StorePayloadError(
+                f"ManyVids store connection has invalid totalCount {raw_total!r}"
+            ) from exc
+        totals[video_type] = total
+        edges = connection.get("edges")
+        edge_refs: list[str] = []
+        if isinstance(edges, dict) and isinstance(edges.get("__refs"), list):
+            edge_refs = [ref for ref in edges["__refs"] if isinstance(ref, str)]
+        elif isinstance(edges, list):
+            edge_refs = [
+                ref["__ref"]
+                for ref in edges
+                if isinstance(ref, dict) and isinstance(ref.get("__ref"), str)
+            ]
+        first_match = _FIRST_ARG.search(key)
+        sizes[video_type] = int(first_match.group(1)) if first_match else len(edge_refs)
+        for edge_ref in edge_refs:
+            edge = records.get(edge_ref)
+            video = (
+                _deref(records, edge.get("node")) if isinstance(edge, dict) else None
+            )
+            if video is None:
+                logger.debug("Skipping malformed ManyVids edge %s", edge_ref)
+                continue
+            local_id, slug, title = (
+                video.get("localId"),
+                video.get("slug"),
+                video.get("title"),
+            )
+            if (  # pylint: disable=too-many-boolean-expressions
+                video.get("__typename") != "Video"
+                or not isinstance(local_id, str)
+                or not local_id.isdigit()
+                or not isinstance(slug, str)
+                or not slug
+                or not isinstance(title, str)
+                or not title
+            ):
+                logger.debug("Skipping malformed ManyVids video record %s", edge_ref)
+                continue
+            screenshot = _deref(records, video.get("screenshot"))
+            thumbnail = screenshot.get("url") if screenshot else None
+            thumbnail_url = (
+                thumbnail.strip() or None if isinstance(thumbnail, str) else None
+            )
+            price = _deref(records, video.get("price")) or {}
+            raw_regular = price.get("regular")
+            regular_price = raw_regular if isinstance(raw_regular, str) else None
+            raw_discounted = price.get("discountedPrice")
+            discounted = raw_discounted if isinstance(raw_discounted, str) else None
+            price_cents, list_price_cents = resolve_manyvids_price(
+                regular_price,
+                discounted,
+                on_sale=price.get("onSale") is True,
+                free=price.get("free") is True,
+            )
+            videos.append(
+                VideoData(
+                    video_id=local_id,
+                    title=html_module.unescape(title),
+                    slug=slug,
+                    url=f"{BASE_URL}/Video/{local_id}/{slug}",
+                    video_type=video_type,
+                    thumbnail_url=thumbnail_url,
+                    price_regular=regular_price.strip() or None
+                    if regular_price is not None
+                    else None,
+                    duration=_format_iso_duration(video.get("duration")),
+                    price_cents=price_cents,
+                    list_price_cents=list_price_cents,
+                )
+            )
+    unique: list[VideoData] = []
+    seen_ids: set[str] = set()
+    for candidate in videos:
+        if candidate.video_id not in seen_ids:
+            seen_ids.add(candidate.video_id)
+            unique.append(candidate)
+    logger.debug(
+        "Parsed ManyVids store: regular=%s/%s mobile=%s/%s unique=%s",
+        sum(v.video_type == "regular" for v in unique),
+        totals["regular"],
+        sum(v.video_type == "mobile" for v in unique),
+        totals["mobile"],
+        len(unique),
+    )
+    return StorePage(
+        unique, totals["regular"], sizes["regular"], totals["mobile"], sizes["mobile"]
+    )
+
+
+def _build_page_url(creator_id: str, creator_name: str, page: int) -> str:
     base = f"{BASE_URL}/Profile/{creator_id}/{creator_name}/Store/Videos"
-    params = {"sort": "newest", "vertical": str(vertical)}
+    params = {"sort": "newest"}
     if page > 1:
         params["page"] = str(page)
     return f"{base}?{urlencode(params)}"
 
 
-def _extract_rsc_video_data(html: str) -> tuple[list[VideoData], int]:
-    for match in _RSC_PATTERN.finditer(html):
-        raw = match.group(1)
-        try:
-            decoded = json.loads('"' + raw + '"')
-        except (json.JSONDecodeError, ValueError):
-            continue
-
-        if "isVideosStore" not in decoded or "swrFallback" not in decoded:
-            continue
-
-        total_pages = 1
-        tp_match = _TOTAL_PAGES_PATTERN.search(decoded)
-        if tp_match:
-            total_pages = int(tp_match.group(1))
-
-        seen_ids: set[str] = set()
-        videos: list[VideoData] = []
-        for video_match in _VIDEO_PATTERN.finditer(decoded):
-            video_id = video_match.group(1)
-            if video_id in seen_ids:
-                continue
-            seen_ids.add(video_id)
-
-            title = html_module.unescape(video_match.group(2))
-            slug = video_match.group(3)
-            thumbnail_raw = video_match.group(4).strip()
-            price_raw = video_match.group(5).strip()
-            duration_raw = video_match.group(7).strip()
-            videos.append(
-                VideoData(
-                    video_id=video_id,
-                    title=title,
-                    slug=slug,
-                    url=f"{BASE_URL}/Video/{video_id}/{slug}",
-                    video_type=video_match.group(6).strip().lower() or "regular",
-                    thumbnail_url=thumbnail_raw or None,
-                    price_regular=price_raw or None,
-                    duration=duration_raw or None,
-                )
-            )
-
-        _enrich_videos_from_dom(html, videos)
-        logger.debug(
-            "RSC extraction: %s unique videos, %s total pages",
-            len(videos),
-            total_pages,
+def _dump_debug_html(html: str, creator_id: str, page_num: int) -> Path | None:
+    directory_value = os.environ.get(DEBUG_DUMP_ENV)
+    if not directory_value:
+        return None
+    try:
+        directory = Path(directory_value)
+        directory.mkdir(parents=True, exist_ok=True)
+        path = (
+            directory
+            / f"store-{creator_id}-p{page_num}-{datetime.now(UTC):%Y%m%dT%H%M%SZ}.html"
         )
-        return videos, total_pages
-
-    logger.warning("RSC video payload not found in page HTML")
-    return [], 1
-
-
-def _enrich_videos_from_dom(html: str, videos: list[VideoData]) -> None:
-    title_meta: dict[str, tuple[str, str]] = {}
-    for match in _CARD_PATTERN.finditer(html):
-        section = match.group("section")
-        title = html_module.unescape(match.group("title")).strip()
-        img_url = html_module.unescape(match.group("img")).strip()
-        if not title:
-            continue
-        video_type = "mobile" if section == "VerticalVideosSection" else "regular"
-        title_meta[title] = (video_type, img_url)
-
-    for video in videos:
-        meta = title_meta.get(video.title.strip())
-        if not meta:
-            continue
-        dom_type, dom_thumb = meta
-        video.video_type = dom_type
-        if dom_thumb:
-            video.thumbnail_url = dom_thumb
+        path.write_text(html, encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Could not write ManyVids debug HTML dump: %s", exc)
+        return None
+    logger.warning("Saved unparseable ManyVids store page to %s", path)
+    return path
 
 
 def _extract_tags_from_html(html: str) -> list[str]:
@@ -283,9 +450,17 @@ class ManyVidsSite(BaseSite):
         self, page: Page, db: Database | None = None
     ) -> list[Item]:
         known_titles = await db.get_known_titles(self.display_name) if db else set()
+        # Notifications still dedupe on titles until IDs are stored (Odoo #590);
+        # numeric IDs parsed from stored URLs only drive the pagination early stop.
+        known_item_ids = await db.get_known_item_ids(self.display_name) if db else set()
+        known_ids = {
+            video_id
+            for item_id in known_item_ids
+            if (video_id := manyvids_video_id_from_url(item_id)) is not None
+        }
         items: list[Item] = []
         creator = self.creator
-        result = await self.scrape_creator_with_retry(page, creator, known_titles)
+        result = await self.scrape_creator_with_retry(page, creator, known_ids)
         if result.error:
             logger.error(
                 "Creator %s failed during scrape: %s",
@@ -362,117 +537,124 @@ class ManyVidsSite(BaseSite):
 
         return await page.content()
 
-    # Ported pagination logic keeps the source scraper's local state explicit.
-    async def _scrape_creator(  # pylint: disable=too-many-locals
+    async def _scrape_creator(  # pylint: disable=too-many-locals,too-many-branches
         self,
         page: Page,
         creator: ManyVidsCreator,
-        known_titles: set[str],
+        known_ids: set[str],
+        *,
+        full_scan: bool = False,
     ) -> CreatorResult:
         all_videos: list[VideoData] = []
-        total_pages = 0
-        sections = [("regular", 1), ("mobile", 2)]
-
-        for section_name, section_vertical in sections:
-            section_total_pages = 1
-            for page_num in range(1, 201):
-                if page_num > 1 or section_vertical > 1:
-                    delay = random.uniform(
-                        self.scraping.delay_between_pages_min,
-                        self.scraping.delay_between_pages_max,
-                    )
-                    logger.debug(
-                        "Creator %s: waiting %.1fs before %s page %s",
-                        creator.creator_name,
-                        delay,
-                        section_name,
-                        page_num,
-                    )
-                    await asyncio.sleep(delay)
-
-                url = _build_page_url(
-                    creator.creator_id,
-                    creator.creator_name,
-                    page_num,
-                    vertical=section_vertical,
+        total_pages = 1
+        expected_total = 0
+        page_num = 1
+        pages_loaded = 0
+        while page_num <= min(total_pages, _MAX_STORE_PAGES):
+            if page_num > 1:
+                delay = random.uniform(
+                    self.scraping.delay_between_pages_min,
+                    self.scraping.delay_between_pages_max,
                 )
                 logger.debug(
-                    "Creator %s: fetching %s page %s: %s",
+                    "Creator %s: waiting %.1fs before page %s",
                     creator.creator_name,
-                    section_name,
+                    delay,
                     page_num,
-                    url,
                 )
-                try:
-                    html = await self._load_page(page, url)
-                except ScraperNotFoundError:
-                    if page_num == 1:
-                        raise
-                    logger.info(
-                        "Creator %s: stopping %s pagination at page %s after 404",
-                        creator.creator_name,
-                        section_name,
-                        page_num,
+                await asyncio.sleep(delay)
+            url = _build_page_url(creator.creator_id, creator.creator_name, page_num)
+            logger.debug(
+                "Creator %s: fetching page %s: %s", creator.creator_name, page_num, url
+            )
+            try:
+                html = await self._load_page(page, url)
+            except ScraperNotFoundError as exc:
+                if page_num == 1:
+                    raise
+                if full_scan:
+                    raise ScraperError(
+                        f"Page {page_num} of {total_pages} "
+                        "returned 404 during full scan"
+                    ) from exc
+                logger.info(
+                    "Creator %s: stopping pagination at page %s after 404",
+                    creator.creator_name,
+                    page_num,
+                )
+                break
+            try:
+                store_page = _parse_store_page(html)
+            except StorePayloadError:
+                _dump_debug_html(html, creator.creator_id, page_num)
+                raise
+            pages_loaded += 1
+            if page_num == 1:
+                total_pages = store_page.total_pages
+                expected_total = store_page.expected_total
+            if not store_page.videos:
+                if full_scan and page_num <= total_pages and expected_total > 0:
+                    raise ScraperError(
+                        f"Page {page_num} of {total_pages} "
+                        "had no videos during full scan"
                     )
-                    section_total_pages = page_num - 1
-                    break
-                page_videos, section_total_pages = _extract_rsc_video_data(html)
-                if not page_videos:
-                    logger.info(
-                        "Creator %s: no %s videos on page %s, stopping section",
-                        creator.creator_name,
-                        section_name,
-                        page_num,
-                    )
-                    break
+                logger.info(
+                    "Creator %s: no videos on page %s, stopping",
+                    creator.creator_name,
+                    page_num,
+                )
+                break
+            all_videos.extend(store_page.videos)
+            if (
+                not full_scan
+                and {video.video_id for video in store_page.videos} <= known_ids
+            ):
+                logger.info(
+                    "Creator %s: all videos on page %s already known",
+                    creator.creator_name,
+                    page_num,
+                )
+                break
+            page_num += 1
 
-                all_videos.extend(page_videos)
-                page_titles = {video.title for video in page_videos}
-                if page_titles.issubset(known_titles):
-                    logger.info(
-                        "Creator %s: all %s videos on page %s already known",
-                        creator.creator_name,
-                        section_name,
-                        page_num,
-                    )
-                    break
-
-                if page_num >= section_total_pages:
-                    break
-
-            total_pages += section_total_pages
-
-        seen: set[str] = set()
         unique_videos: list[VideoData] = []
+        seen_ids: set[str] = set()
         for video in all_videos:
-            if video.video_id in seen:
-                continue
-            seen.add(video.video_id)
-            unique_videos.append(video)
-
+            if video.video_id not in seen_ids:
+                seen_ids.add(video.video_id)
+                unique_videos.append(video)
+        if full_scan and len(unique_videos) != expected_total:
+            raise ScraperError(
+                f"Full scan incomplete: {len(unique_videos)} of {expected_total} videos"
+            )
         logger.info(
-            "Creator %s: scraped %s unique videos across %s pages",
+            "Creator %s: scraped %s unique videos across %s pages%s",
             creator.creator_name,
             len(unique_videos),
-            total_pages,
+            pages_loaded,
+            " (full scan)" if full_scan else "",
         )
         return CreatorResult(
             creator_id=creator.creator_id,
             creator_name=creator.creator_name,
             videos=unique_videos,
-            total_pages=total_pages,
+            total_pages=pages_loaded,
         )
 
     async def scrape_creator_with_retry(
         self,
         page: Page,
         creator: ManyVidsCreator,
-        known_titles: set[str],
+        known_ids: set[str],
+        *,
+        full_scan: bool = False,
     ) -> CreatorResult:
         last_error: Exception | None = None
         for attempt in range(self.scraping.max_retries + 1):
             try:
-                return await self._scrape_creator(page, creator, known_titles)
+                return await self._scrape_creator(
+                    page, creator, known_ids, full_scan=full_scan
+                )
             except ScraperBlockedError as exc:
                 last_error = exc
                 logger.warning(
@@ -500,13 +682,11 @@ class ManyVidsSite(BaseSite):
                     attempt + 1,
                     exc,
                 )
-
             if attempt < self.scraping.max_retries:
                 wait = self.scraping.retry_backoff_base * (2**attempt)
                 wait += random.uniform(0, 5)
                 logger.info("Creator %s: retrying in %.0fs", creator.creator_name, wait)
                 await asyncio.sleep(wait)
-
         return CreatorResult(
             creator_id=creator.creator_id,
             creator_name=creator.creator_name,
