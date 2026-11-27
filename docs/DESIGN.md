@@ -725,79 +725,14 @@ jobs:
       - run: make test-cov
 ```
 
-### `.github/workflows/release.yml`
+### Release workflow
 
-Runs only on push to `master`. Auto-tags from `VERSION` file and publishes
-Docker image to GHCR with both `:latest` and `:<version-without-v-prefix>`.
-
-```yaml
-name: release
-on:
-  push:
-    branches: [master]
-
-permissions:
-  contents: write
-  packages: write
-
-jobs:
-  release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Read version
-        id: version
-        run: |
-          VERSION=$(cat VERSION | tr -d 'v\n')
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Check tag does not exist
-        id: tagcheck
-        run: |
-          if git rev-parse "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Create and push tag
-        if: steps.tagcheck.outputs.exists == 'false'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "${{ steps.version.outputs.tag }}"
-          git push origin "${{ steps.version.outputs.tag }}"
-
-      - name: Log in to GHCR
-        if: steps.tagcheck.outputs.exists == 'false'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Buildx
-        if: steps.tagcheck.outputs.exists == 'false'
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push
-        if: steps.tagcheck.outputs.exists == 'false'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/adult-sub-monitor:latest
-            ghcr.io/${{ github.repository_owner }}/adult-sub-monitor:${{ steps.version.outputs.version }}
-```
-
-Tag-already-exists check means bumping `VERSION` is what triggers a release;
-merging to master without a version bump produces no new tag/image (still
-runs lint/test).
+The `release` job in `.github/workflows/ci.yml` runs on pushes to `master` after
+lint and tests pass. It reads and validates the root `VERSION` file, creates
+the matching `v<version>` tag, and publishes the Docker image with both
+`:latest` and `:<version>` tags. If the tag already exists, it skips publishing;
+merging without a version bump still runs lint and tests without making another
+release.
 
 ### `.github/dependabot.yml`
 
