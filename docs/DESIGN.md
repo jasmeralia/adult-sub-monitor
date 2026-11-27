@@ -326,7 +326,7 @@ class SiteConfig(BaseModel):
 class AppConfig(BaseModel):
     sites: list[SiteConfig]
     discord_webhook_env: str = "DISCORD_WEBHOOK_URL"
-    db_path: Path = Path("/data/monitor.db")
+    db_path: Path = Path("/data/db/monitor.db")
     sessions_dir: Path = Path("/data/sessions")
     log_level: str = "INFO"
     headless: bool = True
@@ -341,7 +341,7 @@ class AppConfig(BaseModel):
 ### `config/config.example.yaml`
 
 ```yaml
-db_path: /data/monitor.db
+db_path: /data/db/monitor.db
 discord_webhook_env: https://discord.com/api/webhooks/REPLACE_ME
 headless: true
 log_level: INFO
@@ -392,6 +392,17 @@ manyvids:
   retry_backoff_base: 10
   user_agent: Mozilla/5.0 (...)
 ```
+
+The SQLite database lives in `/data/db/`, separate from the Playwright browser
+state in `/data/sessions/`. Keep the database directory dedicated to SQLite's
+database and its transient `-wal` and `-shm` files; store backups elsewhere.
+The Compose mapping remains `./data:/data`, so no volume change is needed.
+
+To move an existing database, stop the service first. Move `monitor.db` and, if
+present, `monitor.db-wal` and `monitor.db-shm` together into `data/db/`,
+preserving ownership. Set `db_path` to `/data/db/monitor.db` in
+`config/config.yaml`, then start the service. The planned read-only web UI can
+mount only `data/db/` without exposing browser session state.
 
 ### Environment Variables
 

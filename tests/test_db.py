@@ -163,6 +163,15 @@ def test_reopening_database_applies_migrations_idempotently(tmp_db_path: Path) -
     reopened_db.conn.close()
 
 
+def test_database_creates_parent_directory(tmp_path: Path) -> None:
+    db_path = tmp_path / "db" / "monitor.db"
+
+    db = Database(db_path)
+
+    assert db_path.is_file()
+    db.conn.close()
+
+
 def test_existing_seen_items_table_without_metadata_columns_is_upgraded(
     tmp_db_path: Path,
 ) -> None:

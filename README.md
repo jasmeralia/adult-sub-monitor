@@ -25,6 +25,20 @@ Dockerized Python service that monitors subscription and public creator video si
    docker compose up
    ```
 
+## Data storage and database migration
+
+The SQLite database defaults to `/data/db/monitor.db`. The Docker Compose file
+mounts `./data` at `/data`, so the database is stored on the host at
+`data/db/monitor.db`. Playwright browser sessions remain under
+`/data/sessions/`. Keep `data/db/` dedicated to the database and SQLite's
+transient `-wal` and `-shm` files; store backups elsewhere.
+
+To move an existing database, stop the service first. Move `monitor.db` and,
+if present, `monitor.db-wal` and `monitor.db-shm` together into `data/db/`,
+preserving ownership. Set `db_path: /data/db/monitor.db` in
+`config/config.yaml`, then start the service. The planned read-only web UI can
+then mount only `data/db/` without exposing browser session state.
+
 ## Supported Sites
 
 | Platform type | Sites | Auth | Notes |

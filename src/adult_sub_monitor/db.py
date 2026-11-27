@@ -9,6 +9,7 @@ from adult_sub_monitor.models import Item
 
 class Database:
     def __init__(self, db_path: Path) -> None:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(db_path)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self._apply_migrations()

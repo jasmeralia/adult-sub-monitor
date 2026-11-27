@@ -5,7 +5,7 @@
 # environment variable names or literal values in credentials_env_user and
 # credentials_env_pass; using environment variables is recommended.
 
-db_path: /data/monitor.db
+db_path: /data/db/monitor.db
 discord_webhook_env: https://discord.com/api/webhooks/REPLACE_ME
 headless: true
 log_level: INFO
