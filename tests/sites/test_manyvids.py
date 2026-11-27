@@ -25,6 +25,7 @@ from adult_sub_monitor.sites.manyvids import (
     VideoData,
     _build_page_url,
     _dump_debug_html,
+    _extract_record_map,
     _format_iso_duration,
     _normalize_tag,
     _parse_store_page,
@@ -368,6 +369,41 @@ def test_parse_store_page_raises_when_no_store_connection() -> None:
 
     with pytest.raises(StorePayloadError, match="no storeVideos connection"):
         _parse_store_page(_mutate_store_records(html, remove_connections))
+
+
+def test_parse_store_page_prefers_store_record_map_over_header_map() -> None:
+    # Live pages intermittently render a profile-header recordMap (no
+    # storeVideos) before the store recordMap in the same RSC chunk.
+    html = build_store_html(
+        [video_spec("101"), video_spec("102")],
+        [video_spec("201")],
+        header_record_map_first=True,
+    )
+
+    store = _parse_store_page(html)
+
+    assert [video.video_id for video in store.videos] == ["101", "102", "201"]
+    assert (store.regular_total, store.mobile_total) == (2, 1)
+
+
+def test_parse_store_page_header_only_record_map_reports_missing_store() -> None:
+    header = {
+        "client:root": {
+            "__id": "client:root",
+            "__typename": "__Root",
+            'profile(id:"1")': {"__ref": "HDR1"},
+        },
+        "HDR1": {"__id": "HDR1", "__typename": "Profile", "localId": "1"},
+    }
+    chunk = "6b:" + json.dumps(
+        ["$", "$L67", None, {"isVideosStore": True, "recordMap": header}],
+        separators=(",", ":"),
+    )
+    html = f"<script>self.__next_f.push([1,{json.dumps(chunk)}])</script>"
+
+    assert _extract_record_map(html) == header
+    with pytest.raises(StorePayloadError, match="no storeVideos connection"):
+        _parse_store_page(html)
 
 
 def test_parse_store_page_rejects_non_numeric_total_count() -> None:

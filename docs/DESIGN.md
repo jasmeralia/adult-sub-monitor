@@ -217,7 +217,9 @@ selectors.
 
 Anonymous public creator-store scraper. A single `manyvids` site config contains
 one or more creators. Store pages are parsed from the embedded Relay
-`recordMap`, following the regular (70 items) and mobile (14 items)
+`recordMap` (the chunk can also hold a small profile-header recordMap, so the
+parser picks the one whose `Profile` has `storeVideos` connections), following
+the regular (70 items) and mobile (14 items)
 `storeVideos` connections. Both connections use `?page=N`; `totalCount` and
 connection page sizes determine how many pages to load. Video type comes from
 the connection. The pagination early stop uses known numeric video IDs parsed
