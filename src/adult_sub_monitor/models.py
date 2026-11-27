@@ -87,7 +87,7 @@ class SiteConfig(BaseModel):
 class AppConfig(BaseModel):
     sites: list[SiteConfig]
     discord_webhook_env: str = "DISCORD_WEBHOOK_URL"
-    db_path: Path = Path("/data/monitor.db")
+    db_path: Path = Path("/data/db/monitor.db")
     sessions_dir: Path = Path("/data/sessions")
     log_level: str = "INFO"
     headless: bool = True

@@ -121,6 +121,12 @@ def test_app_config_accepts_manyvids_scraping_config() -> None:
     assert config.manyvids.delay_between_creators_min == 1
 
 
+def test_app_config_defaults_database_to_dedicated_directory() -> None:
+    config = AppConfig(sites=[])
+
+    assert config.db_path == Path("/data/db/monitor.db")
+
+
 def test_non_manyvids_site_requires_login_url() -> None:
     with pytest.raises(ValidationError, match="login_url"):
         SiteConfig(
