@@ -199,6 +199,17 @@ class Database:
         )
         return {row[0] for row in cursor.fetchall()}
 
+    async def get_known_item_ids(self, site_name: str) -> set[str]:
+        cursor = self.conn.execute(
+            """
+            SELECT item_id
+            FROM seen_items
+            WHERE site_name = ?
+            """,
+            (site_name,),
+        )
+        return {row[0] for row in cursor.fetchall()}
+
     async def mark_notified(self, item: Item) -> None:
         self.conn.execute(
             """

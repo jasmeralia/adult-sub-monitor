@@ -34,7 +34,9 @@ Use spaces only, no tabs. Do not leave trailing whitespace. Linting runs through
 
 `sites/venus_platform.py` implements the shared Venus platform scraper for the Venus subscription sites, using video listings plus per-card video checks to exclude photo sets.
 
-`sites/manyvids.py` implements anonymous ManyVids creator-store scraping, including regular/mobile store pagination, retry/backoff behavior, and per-video tag extraction.
+`sites/manyvids.py` implements anonymous ManyVids creator-store scraping, parsing store pages from the embedded Relay `recordMap`, including regular/mobile connections, pagination, retry/backoff behavior, and per-video tag extraction.
+
+`pricing.py` parses prices and ManyVids video IDs, and maps ManyVids list and sale prices.
 
 `main.py` orchestrates config loading, logging, scheduling, per-site checks, deduplication, notifications, retry handling, and graceful shutdown.
 
