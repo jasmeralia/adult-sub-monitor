@@ -25,6 +25,7 @@ such as ManyVids run anonymously.
 - Detect new videos (only — never photo sets) on each site every N hours.
 - Notify a Discord webhook with title, URL, thumbnail, performers, and tags.
 - Deduplicate via SQLite so each video notifies exactly once.
+- Track ManyVids per-video prices over time (price history, list and sale price).
 - Run as a single Docker container with mounted config + data volumes.
 - Comprehensive unit tests via pytest with mocked Playwright/HTTP layers.
 - CI: lint on all branches, auto-tag and publish Docker image to GHCR on merge
@@ -37,7 +38,9 @@ such as ManyVids run anonymously.
 - Photo set notifications (explicitly excluded).
 - Sites beyond the listed families below (extensible, but not in scope).
 - Multi-recipient or multi-channel notifications (Discord webhook only).
-- Web UI or admin dashboard (CLI/config-file only).
+- Web UI or admin dashboard (CLI/config-file only; a separate read-only
+  consumer, `storm-monitor-explorer`, reads `data/db/`).
+- Price-drop notifications.
 
 ---
 
@@ -82,7 +85,7 @@ adult-sub-monitor/
 │       ├── db.py                 # SQLite layer
 │       ├── discord.py            # Webhook notifier
 │       ├── config.py             # Pydantic config models
-│       ├── pricing.py            # Price parsing and ManyVids URL helpers
+│       ├── pricing.py            # Price parsing, identity helpers, observations
 │       ├── models.py             # Domain types (Item, Site, etc.)
 │       ├── tags.py               # Tag word splitting + capitalization
 │       ├── data/tag_words.txt    # Shipped default tag word list
@@ -104,9 +107,11 @@ adult-sub-monitor/
 │   └── sites/
 │       ├── __init__.py
 │       ├── test_base.py
+│       ├── manyvids_payload.py   # Compact Relay payload test builder
 │       ├── test_manyvids.py
 │       ├── test_venus_platform.py
 │       └── test_wowgirls_platform.py
+├── docs/plans/
 ├── .dockerignore
 ├── .gitignore
 ├── .python-version              # 3.13
@@ -126,6 +131,7 @@ adult-sub-monitor/
 **`main.py` — Orchestrator**
 - Loads config, sets up logging, creates DB connection.
 - Schedules per-site checks via `apscheduler.AsyncIOScheduler` with jitter.
+- Schedules per-creator price refresh jobs from persisted refresh-state timestamps.
 - Optional `RUN_ONCE=1` mode for one-shot execution (useful for testing).
 - Optional `DRY_RUN=1` mode skips DB writes and notifications.
 - Handles graceful shutdown on SIGTERM (drains in-flight checks).
@@ -147,7 +153,12 @@ adult-sub-monitor/
 
 **`db.py` — SQLite layer**
 - Schema in `_apply_migrations()`; idempotent on startup.
-- Tables: `seen_items`, `failed_notifications`, `schema_version`.
+- Applies idempotent `PRAGMA user_version` migrations; v2 adds price history,
+  refresh state, and duplicate archives.
+- ManyVids identity uses `(site_name, video_id)` while `item_id` remains the URL.
+- Tables include `seen_items`, `failed_notifications`, `schema_version`,
+  `price_observations`, `price_refresh_state`, and
+  `seen_items_merged_duplicates`.
 - `seen_items` includes optional metadata columns for `duration`, `price`,
   `video_type`, and `creator` so ManyVids-specific details survive retries.
 - WAL mode enabled.
@@ -171,6 +182,7 @@ class BaseSite(ABC):
     listing_url: str | None
     has_interstitial: bool = False
     requires_auth: bool = True
+    tracks_prices: bool = False
 
     def context_options(self) -> dict[str, object]:
         return {}
@@ -185,6 +197,12 @@ class BaseSite(ABC):
         return False
 
     async def is_logged_in(self, page: Page) -> bool: ...
+
+    def price_scope(self) -> tuple[str, str] | None: ...
+
+    async def refresh_prices(
+        self, page: Page, db: Database, *, dry_run: bool = False
+    ) -> None: ...
 
     @abstractmethod
     async def get_latest_items(
@@ -222,18 +240,16 @@ parser picks the one whose `Profile` has `storeVideos` connections), following
 the regular (70 items) and mobile (14 items)
 `storeVideos` connections. Both connections use `?page=N`; `totalCount` and
 connection page sizes determine how many pages to load. Video type comes from
-the connection. The pagination early stop uses known numeric video IDs parsed
-from stored item URLs, while new-video detection still matches known titles
-until IDs are stored per row. An unparseable store payload raises an error and
-is retried instead of being treated as an empty page. Set
-`MANYVIDS_DEBUG_DUMP_DIR` to save such pages as HTML for debugging. The scraper
-also handles retry/backoff for blocked or failed creator scrapes, per-video
-detail-page tag extraction, and metadata enrichment for creator, type,
-duration, and price. It overrides `requires_auth`, `context_options()`, and
-`init_scripts()` to run without stored credentials and with ManyVids-specific
-browser context settings. The `og:description` meta content is read with a
-quote-aware pattern so apostrophes in descriptions are kept, and tags are
-passed through `tags.format_tag`.
+the connection, while early-stop behavior uses known numeric video IDs. An
+unparseable store payload raises an error and is retried instead of being
+treated as an empty page. Set `MANYVIDS_DEBUG_DUMP_DIR` to save such pages as
+HTML for debugging. The scraper also handles retry/backoff for blocked or
+failed creator scrapes and per-video detail-page tag extraction. It overrides
+`requires_auth`,
+`context_options()`, and `init_scripts()` to run without stored credentials and
+with ManyVids-specific browser context settings. The `og:description` meta
+content is read with a quote-aware pattern so apostrophes in descriptions are
+kept, and tags are passed through `tags.format_tag`.
 
 **`tags.py` — tag formatting**
 
@@ -272,10 +288,60 @@ CREATE TABLE seen_items (
     creator TEXT,
     first_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     notified_at TIMESTAMP,
+    video_id TEXT,
+    pricing_model TEXT,              -- 'per_video' | 'subscription'
+    first_price_cents INTEGER,
+    current_price_cents INTEGER,
+    list_price_cents INTEGER,
+    price_checked_at TIMESTAMP,
     PRIMARY KEY (site_name, item_id)
 );
 
 CREATE INDEX idx_seen_items_first_seen ON seen_items (first_seen_at DESC);
+CREATE UNIQUE INDEX idx_seen_items_site_video
+    ON seen_items (site_name, video_id) WHERE video_id IS NOT NULL;
+
+CREATE TABLE price_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_name TEXT NOT NULL,
+    video_id TEXT NOT NULL,
+    observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    price_cents INTEGER NOT NULL,
+    list_price_cents INTEGER,
+    currency TEXT NOT NULL DEFAULT 'USD'
+);
+CREATE INDEX idx_price_obs_item_time
+    ON price_observations (site_name, video_id, observed_at);
+
+CREATE TABLE price_refresh_state (
+    site_name TEXT NOT NULL,
+    creator_id TEXT NOT NULL,
+    last_success_at TIMESTAMP,
+    last_attempt_at TIMESTAMP,
+    last_error TEXT,
+    PRIMARY KEY (site_name, creator_id)
+);
+
+CREATE TABLE seen_items_merged_duplicates (
+    site_name TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    url TEXT NOT NULL,
+    thumbnail_url TEXT,
+    performers TEXT,
+    tags TEXT,
+    duration TEXT,
+    price TEXT,
+    video_type TEXT,
+    creator TEXT,
+    description TEXT,
+    first_seen_at TIMESTAMP,
+    notified_at TIMESTAMP,
+    video_id TEXT NOT NULL,
+    merged_into_item_id TEXT NOT NULL,
+    merged_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (site_name, item_id)
+);
 
 CREATE TABLE failed_notifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -288,7 +354,18 @@ CREATE TABLE failed_notifications (
 );
 
 CREATE INDEX idx_failed_last_attempted ON failed_notifications (last_attempted_at);
+
+PRAGMA user_version = 2;
 ```
+
+The v2 migration classifies ManyVids URLs as `per_video`, backfills numeric
+`video_id` values and merges rows sharing `(site_name, video_id)`. The earliest
+`first_seen_at` row wins (rowid breaks ties); losers are archived in
+`seen_items_merged_duplicates`, their failed notification rows are removed, and
+the earliest non-null `notified_at` is carried to the winner when needed. The
+legacy `item_id` remains the full URL. `idx_seen_items_site_video` enforces
+ManyVids identity by `(site_name, video_id)` while leaving rows without IDs
+unconstrained.
 
 ### Domain Types (Pydantic)
 
@@ -305,6 +382,11 @@ class Item(BaseModel):
     price: str | None = None
     video_type: str | None = None
     creator: str | None = None
+    description: str | None = None
+    video_id: str | None = None
+    pricing_model: Literal["per_video", "subscription"] = "subscription"
+    price_cents: int | None = None
+    list_price_cents: int | None = None
 
 class ManyVidsCreator(BaseModel):
     creator_id: str
@@ -320,6 +402,12 @@ class ManyVidsScrapingConfig(BaseModel):
     max_retries: int = 3
     retry_backoff_base: float = 10
     user_agent: str = "Mozilla/5.0 (...)"
+    creator_interval_hours: float = 12
+    creator_jitter_seconds: int = 21600
+    price_refresh_enabled: bool = True
+    price_refresh_interval_hours: float = 72
+    price_refresh_jitter_seconds: int = 21600
+    price_refresh_stagger_seconds: int = 600
 
 class SiteConfig(BaseModel):
     name: str
@@ -344,6 +432,113 @@ class AppConfig(BaseModel):
     headless: bool = True
     user_agent: str | None = None
     manyvids: ManyVidsScrapingConfig | None = None
+```
+
+## Price tracking (ManyVids)
+
+Price history applies only to rows with `pricing_model = 'per_video'`.
+Subscription rows never receive observations and are never considered on sale.
+ManyVids' normalized Relay `Price` record has `regular`, `discountedPrice`,
+`onSale`, `free`, and `promoRate` fields. The monitor maps it as follows:
+
+```json
+{"__typename":"Price","free":false,"onSale":true,"regular":"24.99",
+ "discountedPrice":"21.24","promoRate":15}
+```
+
+| Relay value | `list_price_cents` | `price_cents` |
+|---|---:|---:|
+| Regular price, no valid sale | `regular` | `regular` |
+| `onSale` and `0 < discountedPrice < regular` | `regular` | `discountedPrice` |
+| `free: true` | `regular` when parseable | `0` |
+| Missing or invalid regular price | NULL | NULL (unless free, then 0) |
+
+Prices are parsed as decimal dollars and rounded half-up to cents. The legacy
+`price` TEXT column remains the raw regular price at first sight. For rows
+inserted after v2, `first_price_cents` is the effective price at first sight.
+Backfilled rows hold the regular price parsed from `price`, because the
+pre-v2 parser read only `regular`. `current_price_cents` and
+`list_price_cents` hold the latest successful observation. `price_checked_at`
+is a heartbeat for the last successful full scan that saw the video, or its
+insert time.
+
+`price_observations` records a new row only when `(price_cents,
+list_price_cents)` differs from that video's latest observation. A new item
+with a price always gets its first observation. The v2 migration does not
+synthesize history for existing rows; their observation history begins on the
+first full re-scan.
+
+### Full re-scan workflow and pacing
+
+Each ManyVids creator gets a `price-refresh-<site.name>` APScheduler job. It
+loads `ceil(regular_total / 70)` or `ceil(mobile_total / 14)` pages, whichever
+count is larger, using the existing page delays and retry/backoff settings. A
+single global price lock serializes refreshes; each refresh then takes the
+creator's existing site lock, completes a full scan, records it with
+`record_price_scan` (or records `record_price_scan_failure`), releases the
+locks, and waits for the configured creator delay before the next scan.
+
+The default interval is 72 hours with up to six hours of jitter. On a fresh
+deploy, first scans start about 600 seconds after startup, with each subsequent
+creator spaced by `price_refresh_stagger_seconds`. The scheduled start is
+computed from `price_refresh_state.last_success_at`, so a process restart does
+not trigger an extra re-scan. Set `RUN_ONCE=1` and `RUN_PRICE_REFRESH=1` to run
+one refresh after normal checks.
+
+A full scan records nothing if any page fails, returns 404 or has no videos
+before the last expected page, or if the unique video count does not match page
+1's combined `totalCount`. The error is saved in `price_refresh_state`. Videos
+seen in a refresh without a `seen_items` row are ignored; only the normal check
+cycle ingests and notifies new videos.
+
+### Sale state for consumers
+
+Sale state is derived, in this order, and is not persisted:
+
+1. Subscription rows or rows with no current price: N/A.
+2. If `list_price_cents > current_price_cents`: `list_price_sale`, discounted
+   by `(list - current) / list`.
+3. If current price is below the maximum observation in the last 90 days:
+   `price_drop`, discounted relative to that maximum.
+4. If current price is below `first_price_cents`: `below_first_seen`,
+   discounted relative to the first price.
+5. Otherwise: `not_on_sale`.
+
+Reference SQL:
+
+```sql
+SELECT s.site_name, s.video_id, s.title,
+       s.first_price_cents, s.current_price_cents, s.list_price_cents,
+       m.max_90d_cents,
+       CASE
+           WHEN s.pricing_model <> 'per_video' OR s.current_price_cents IS NULL THEN NULL
+           WHEN s.list_price_cents > s.current_price_cents THEN 'list_price_sale'
+           WHEN s.current_price_cents < m.max_90d_cents THEN 'price_drop'
+           WHEN s.current_price_cents < s.first_price_cents THEN 'below_first_seen'
+           ELSE 'not_on_sale'
+       END AS sale_state
+FROM seen_items AS s
+LEFT JOIN (
+    SELECT site_name, video_id, MAX(price_cents) AS max_90d_cents
+    FROM price_observations
+    WHERE observed_at >= datetime('now', '-90 days')
+    GROUP BY site_name, video_id
+) AS m ON m.site_name = s.site_name AND m.video_id = s.video_id;
+```
+
+After the first v2 startup, verify the migration read-only:
+
+```sql
+PRAGMA user_version;
+SELECT pricing_model, COUNT(*), COUNT(video_id), COUNT(price), COUNT(first_price_cents)
+FROM seen_items GROUP BY pricing_model;
+SELECT COUNT(*) FROM seen_items_merged_duplicates;
+SELECT site_name, video_id, COUNT(*) FROM seen_items
+WHERE video_id IS NOT NULL GROUP BY 1, 2 HAVING COUNT(*) > 1;
+SELECT COUNT(*) FROM price_observations;
+SELECT site_name, creator_id, last_success_at, last_error FROM price_refresh_state;
+SELECT COUNT(*), COUNT(current_price_cents), COUNT(price_checked_at)
+FROM seen_items WHERE pricing_model = 'per_video';
 ```
 
 ---
@@ -429,6 +624,7 @@ mount only `data/db/` without exposing browser session state.
 | `MANYVIDS_TAG_WORDS`      | unset                    | Comma-separated tag words, layered over defaults |
 | `MANYVIDS_TAG_WORDS_FILE` | `/config/manyvids_tag_words.txt` | Tag word file, layered over defaults (optional) |
 | `MANYVIDS_DEBUG_DUMP_DIR` | unset                    | Optional directory for unparseable ManyVids store-page HTML dumps |
+| `RUN_PRICE_REFRESH`       | unset                    | With `RUN_ONCE=1`, run a full price re-scan for every ManyVids creator after checks |
 
 ---
 
@@ -465,6 +661,16 @@ mount only `data/db/` without exposing browser session state.
 spacing; a uniform random jitter of ±15 minutes is added per fire to avoid
 all-sites-at-once thundering herds. On startup, each site's first run is
 staggered by `index * 30s` to avoid simultaneous launches.
+
+### Price refresh cycle
+
+Each `price-refresh-<site.name>` job takes the global price-refresh lock and
+then the per-site lock, opens the creator context, runs a full store scan, and
+records a complete scan with `record_price_scan` or a failed scan with
+`record_price_scan_failure`. It closes the page and context, releases the
+locks, and applies the existing delay between creators. The first scheduled
+time is based on the persisted `price_refresh_state.last_success_at`, with the
+startup delay and per-creator stagger, so restarts preserve the next due time.
 
 ### Failure & retry
 
@@ -639,7 +845,7 @@ services:
 | `config.py`                     | `tests/test_config.py`                 | YAML fixtures, Pydantic validation     |
 | `browser.py`                    | `tests/test_browser.py`                | `AsyncMock` for Playwright objects     |
 | `main.py`                       | `tests/test_main.py`                   | Mocked scheduler, mocked sites         |
-| `pricing.py`                    | `tests/test_pricing.py`                | Pure price and ManyVids URL helpers    |
+| `pricing.py`                    | `tests/test_pricing.py`                | Pure price and ManyVids URL helpers     |
 | `tags.py`                       | `tests/test_tags.py`                   | Pure functions, env/file loading       |
 | `sites/base.py`                 | `tests/sites/test_base.py`             | Concrete test subclass                 |
 | `sites/manyvids.py`             | `tests/sites/test_manyvids.py`         | HTML fixtures + AsyncMock pages        |
@@ -653,7 +859,8 @@ services:
 - Duplicate insert returns "not new"
 - `failed_notifications` insert/increment/cap-at-10
 - Metadata columns for duration, price, video type, and creator round-trip
-- Schema migration is idempotent
+- v2 backfills, duplicate-ID archival, rollback and idempotent reopen
+- First price observations, change-only history, refresh heartbeat and failure state
 
 **`test_discord.py`**
 - Embed structure matches expected JSON shape
@@ -679,7 +886,7 @@ services:
 
 **`test_manyvids.py`**
 - Relay `recordMap` parsing for regular/mobile videos, prices, duration and thumbnails
-- Pagination, ID-based early stop and full-scan validation
+- Numeric-ID deduplication, pagination, early stop and full-scan validation
 - Unparseable payload retries and optional HTML debug dumps
 - Detail-page tag extraction strips leading `#`
 - Retry/backoff behavior for blocked or failed creator scrapes
@@ -687,6 +894,7 @@ services:
 
 **`test_main.py`**
 - `RUN_ONCE=1` runs each site once and exits
+- Price refresh scheduling resumes from persisted success times and serializes creators
 - `DRY_RUN=1` skips DB writes and notifications
 - Per-site lock prevents overlapping runs
 - New item triggers notification; duplicate does not

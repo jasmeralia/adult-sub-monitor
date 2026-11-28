@@ -1,7 +1,8 @@
 import asyncio
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -21,6 +22,7 @@ def clear_site_locks() -> None:
     from adult_sub_monitor import main
 
     main._site_locks.clear()
+    main._price_refresh_lock = None
 
 
 def build_item(site_name: str = "test_site", item_id: str = "item-1") -> Item:
@@ -702,3 +704,206 @@ async def test_keyword_suppressed_skips_retry(mocker) -> None:
 
     send_video_notification.assert_not_called()
     db.mark_notified.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("last_offset", "index", "stagger", "expected"),
+    [
+        (None, 0, 600, 600),
+        (None, 2, 600, 1800),
+        (10, 0, 600, 62 * 3600 + 600),
+        (100, 1, 600, 1200),
+    ],
+)
+def test_price_refresh_initial_delay_seconds(
+    last_offset, index, stagger, expected
+) -> None:
+    from adult_sub_monitor.main import _price_refresh_initial_delay_seconds
+
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    last = now - timedelta(hours=last_offset) if last_offset is not None else None
+    assert (
+        _price_refresh_initial_delay_seconds(last, now, 72, index, stagger) == expected
+    )
+
+
+@pytest.mark.asyncio
+async def test_refresh_site_prices_skips_non_tracking_site() -> None:
+    from adult_sub_monitor.main import _refresh_site_prices
+    from adult_sub_monitor.models import ManyVidsScrapingConfig
+
+    site = AsyncMock()
+    site.tracks_prices = False
+    browser = AsyncMock()
+    await _refresh_site_prices(
+        site, AsyncMock(), browser, AsyncMock(), ManyVidsScrapingConfig(), False
+    )
+    browser.ensure_authenticated.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refresh_site_prices_runs_refresh_and_closes_context() -> None:
+    from adult_sub_monitor.main import _refresh_site_prices
+    from adult_sub_monitor.models import ManyVidsScrapingConfig
+
+    site = AsyncMock()
+    site.name = "manyvids:creator"
+    site.tracks_prices = True
+    context = build_context()
+    browser = AsyncMock()
+    browser.ensure_authenticated = AsyncMock(return_value=context)
+    db = AsyncMock()
+    sleep = AsyncMock()
+    with (
+        patch("adult_sub_monitor.main.random.uniform", return_value=4.5),
+        patch("adult_sub_monitor.main.asyncio.sleep", new=sleep),
+    ):
+        await _refresh_site_prices(
+            site, AsyncMock(), browser, db, ManyVidsScrapingConfig(), False
+        )
+    page = context.new_page.return_value
+    site.refresh_prices.assert_awaited_once_with(page, db, dry_run=False)
+    page.close.assert_awaited_once()
+    context.close.assert_awaited_once()
+    sleep.assert_awaited_once_with(4.5)
+
+
+@pytest.mark.asyncio
+async def test_refresh_site_prices_closes_context_when_refresh_raises() -> None:
+    from adult_sub_monitor.main import _refresh_site_prices
+    from adult_sub_monitor.models import ManyVidsScrapingConfig
+
+    site = AsyncMock()
+    site.name = "manyvids:creator"
+    site.tracks_prices = True
+    site.refresh_prices = AsyncMock(side_effect=RuntimeError("refresh failed"))
+    context = build_context()
+    browser = AsyncMock()
+    browser.ensure_authenticated = AsyncMock(return_value=context)
+    with pytest.raises(RuntimeError, match="refresh failed"):
+        await _refresh_site_prices(
+            site, AsyncMock(), browser, AsyncMock(), ManyVidsScrapingConfig(), False
+        )
+    context.new_page.return_value.close.assert_awaited_once()
+    context.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_schedule_price_refresh_jobs_adds_job_per_tracking_site() -> None:
+    from adult_sub_monitor.main import _schedule_price_refresh_jobs
+    from adult_sub_monitor.models import ManyVidsScrapingConfig
+
+    now_local = datetime(2026, 1, 1, 12)
+    now_utc = datetime(2026, 1, 1, 20, tzinfo=UTC)
+    first = AsyncMock()
+    first.name = "mv:one"
+    first.tracks_prices = True
+    first.price_scope = MagicMock(return_value=("ManyVids", "1"))
+    second = AsyncMock()
+    second.name = "mv:two"
+    second.tracks_prices = True
+    second.price_scope = MagicMock(return_value=("ManyVids", "2"))
+    skipped = AsyncMock()
+    skipped.name = "venus"
+    skipped.tracks_prices = False
+    db = AsyncMock()
+    db.get_price_refresh_last_success = AsyncMock(
+        side_effect=[None, now_utc - timedelta(hours=10)]
+    )
+    scheduler = MagicMock()
+    added = await _schedule_price_refresh_jobs(
+        scheduler,
+        [(AsyncMock(), first), (AsyncMock(), skipped), (AsyncMock(), second)],
+        ManyVidsScrapingConfig(),
+        AsyncMock(),
+        db,
+        False,
+        now_local,
+        now_utc,
+    )
+    assert added == 2
+    assert [call.kwargs["id"] for call in scheduler.add_job.call_args_list] == [
+        "price-refresh-mv:one",
+        "price-refresh-mv:two",
+    ]
+    first_trigger = scheduler.add_job.call_args_list[0].kwargs["trigger"]
+    second_trigger = scheduler.add_job.call_args_list[1].kwargs["trigger"]
+    assert first_trigger.interval == timedelta(hours=72)
+    expected_start = now_local + timedelta(hours=62, seconds=1200)
+    actual_start = second_trigger.start_date.replace(tzinfo=None)
+    assert abs((actual_start - expected_start).total_seconds()) < 1
+
+
+@pytest.mark.asyncio
+async def test_schedule_price_refresh_jobs_disabled() -> None:
+    from adult_sub_monitor.main import _schedule_price_refresh_jobs
+    from adult_sub_monitor.models import ManyVidsScrapingConfig
+
+    scheduler = MagicMock()
+    scraping = ManyVidsScrapingConfig(price_refresh_enabled=False)
+    assert (
+        await _schedule_price_refresh_jobs(
+            scheduler,
+            [],
+            scraping,
+            AsyncMock(),
+            AsyncMock(),
+            False,
+            datetime.now(),
+            datetime.now(UTC),
+        )
+        == 0
+    )
+    scheduler.add_job.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_once_runs_price_refresh_when_env_set(mocker, monkeypatch) -> None:
+    monkeypatch.setenv("RUN_ONCE", "1")
+    monkeypatch.setenv("RUN_PRICE_REFRESH", "1")
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.example/webhook")
+    site_config = build_site_config("site_one")
+    site = build_site("site_one")
+    config = build_config([site_config])
+    browser = AsyncMock()
+    events = []
+    mocker.patch("adult_sub_monitor.main.load_config", return_value=config)
+    mocker.patch("adult_sub_monitor.main.Database")
+    mocker.patch("adult_sub_monitor.main.BrowserManager", return_value=browser)
+    mocker.patch("adult_sub_monitor.main._build_site", return_value=site)
+    mocker.patch(
+        "adult_sub_monitor.main._check_site",
+        new=AsyncMock(side_effect=lambda *args: events.append("check")),
+    )
+    refresh = mocker.patch(
+        "adult_sub_monitor.main._refresh_site_prices",
+        new=AsyncMock(side_effect=lambda *args: events.append("refresh")),
+    )
+    from adult_sub_monitor.main import run
+
+    await run()
+    assert events == ["check", "refresh"]
+    refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_once_skips_price_refresh_by_default(mocker, monkeypatch) -> None:
+    monkeypatch.setenv("RUN_ONCE", "1")
+    monkeypatch.delenv("RUN_PRICE_REFRESH", raising=False)
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.example/webhook")
+    site_config = build_site_config("site_one")
+    site = build_site("site_one")
+    mocker.patch(
+        "adult_sub_monitor.main.load_config", return_value=build_config([site_config])
+    )
+    mocker.patch("adult_sub_monitor.main.Database")
+    mocker.patch("adult_sub_monitor.main.BrowserManager", return_value=AsyncMock())
+    mocker.patch("adult_sub_monitor.main._build_site", return_value=site)
+    mocker.patch("adult_sub_monitor.main._check_site", new=AsyncMock())
+    refresh = mocker.patch(
+        "adult_sub_monitor.main._refresh_site_prices", new=AsyncMock()
+    )
+    from adult_sub_monitor.main import run
+
+    await run()
+    refresh.assert_not_awaited()

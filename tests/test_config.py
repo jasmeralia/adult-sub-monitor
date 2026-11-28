@@ -218,3 +218,21 @@ def test_blocked_keywords_defaults_to_empty(tmp_path: Path) -> None:
     config = load_config(config_path)
 
     assert config.blocked_keywords == []
+
+
+def test_manyvids_price_refresh_defaults() -> None:
+    config = ManyVidsScrapingConfig()
+    assert config.price_refresh_enabled is True
+    assert config.price_refresh_interval_hours == 72.0
+    assert config.price_refresh_jitter_seconds == 21600
+    assert config.price_refresh_stagger_seconds == 600
+
+
+def test_manyvids_price_refresh_interval_must_be_positive() -> None:
+    with pytest.raises(ValidationError):
+        ManyVidsScrapingConfig(price_refresh_interval_hours=0)
+
+
+def test_example_config_validates() -> None:
+    config_path = Path(__file__).parents[1] / "config" / "config.example.yaml"
+    assert isinstance(load_config(config_path), AppConfig)
