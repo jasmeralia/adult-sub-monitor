@@ -478,9 +478,12 @@ creator's existing site lock, completes a full scan, records it with
 `record_price_scan` (or records `record_price_scan_failure`), releases the
 locks, and waits for the configured creator delay before the next scan.
 
-The default interval is 72 hours with up to six hours of jitter. On a fresh
-deploy, first scans start about 600 seconds after startup, with each subsequent
-creator spaced by `price_refresh_stagger_seconds`. The scheduled start is
+The default interval is 72 hours. APScheduler jitter only delays a fire, so
+each scan, including the first, runs up to `price_refresh_jitter_seconds` (six
+hours by default) after its base time. On a fresh deploy, creator *i*'s base
+time is about `600 + i * price_refresh_stagger_seconds` seconds after startup,
+so first scans land within roughly the first six to nine hours. The scheduled
+start is
 computed from `price_refresh_state.last_success_at`, so a process restart does
 not trigger an extra re-scan. Set `RUN_ONCE=1` and `RUN_PRICE_REFRESH=1` to run
 one refresh after normal checks.
@@ -658,9 +661,11 @@ mount only `data/db/` without exposing browser session state.
 ### Scheduling
 
 `apscheduler.AsyncIOScheduler` with one job per site. `interval_hours` controls
-spacing; a uniform random jitter of ±15 minutes is added per fire to avoid
-all-sites-at-once thundering herds. On startup, each site's first run is
-staggered by `index * 30s` to avoid simultaneous launches.
+spacing. APScheduler adds a uniform random delay of 0 to `jitter_seconds` to
+every fire, including the first, to avoid all-sites-at-once thundering herds.
+The default is 15 minutes; ManyVids creators use `creator_jitter_seconds`, six
+hours by default. On startup, each site's base first run is staggered by
+`index * 30s` to avoid simultaneous launches.
 
 ### Price refresh cycle
 
