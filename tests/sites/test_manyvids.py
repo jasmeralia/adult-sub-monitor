@@ -461,6 +461,87 @@ async def test_scrape_creator_early_stops_when_page_ids_are_known() -> None:
 
 
 @pytest.mark.asyncio
+async def test_scrape_creator_stops_when_page_reaches_known_videos() -> None:
+    # One new upload on page 1 followed by known videos must not walk the
+    # remaining pages: they are older than the newest stored video.
+    site = _site()
+    payload = build_store_html(
+        [video_spec("900"), video_spec("101"), video_spec("102")],
+        regular_total=300,
+    )
+    load = AsyncMock(return_value=payload)
+    with patch.object(site, "_load_page", load):
+        result = await site._scrape_creator(AsyncMock(), _creator(), {"101", "102"})
+    assert load.await_count == 1
+    assert [video.video_id for video in result.videos] == ["900", "101", "102"]
+
+
+@pytest.mark.asyncio
+async def test_scrape_creator_continues_while_mobile_page_is_all_new() -> None:
+    # Regular videos reach known ones on page 1, but every mobile video on the
+    # page is new, so newer mobile uploads may continue on page 2.
+    site = _site()
+    page1 = build_store_html(
+        [video_spec("900"), video_spec("101")],
+        [video_spec("950"), video_spec("951")],
+        regular_total=140,
+        mobile_total=28,
+    )
+    page2 = build_store_html(
+        [video_spec("102")],
+        [video_spec("952"), video_spec("201")],
+        page=2,
+        regular_total=140,
+        mobile_total=28,
+    )
+    load = AsyncMock(side_effect=[page1, page2])
+    with (
+        patch.object(site, "_load_page", load),
+        patch("adult_sub_monitor.sites.manyvids.asyncio.sleep", new=AsyncMock()),
+    ):
+        result = await site._scrape_creator(
+            AsyncMock(), _creator(), {"101", "102", "201"}
+        )
+    assert load.await_count == 2
+    assert {"950", "951", "952"} <= {video.video_id for video in result.videos}
+
+
+@pytest.mark.asyncio
+async def test_scrape_creator_new_creator_reads_every_page() -> None:
+    site = _site()
+    page1 = build_store_html([video_spec("1")], regular_total=140)
+    page2 = build_store_html([video_spec("2")], page=2, regular_total=140)
+    load = AsyncMock(side_effect=[page1, page2])
+    with (
+        patch.object(site, "_load_page", load),
+        patch("adult_sub_monitor.sites.manyvids.asyncio.sleep", new=AsyncMock()),
+    ):
+        result = await site._scrape_creator(AsyncMock(), _creator(), set())
+    assert load.await_count == 2
+    assert [video.video_id for video in result.videos] == ["1", "2"]
+
+
+@pytest.mark.asyncio
+async def test_full_scan_ignores_known_video_early_stop() -> None:
+    site = _site()
+    page1 = build_store_html([video_spec("900"), video_spec("101")], regular_total=3)
+    page2 = build_store_html([video_spec("102")], page=2, regular_total=3)
+    page1 = page1.replace("first:70", "first:2")
+    page2 = page2.replace("first:70,offset:70", "first:2,offset:2")
+    load = AsyncMock(side_effect=[page1, page2])
+    with (
+        patch.object(site, "_load_page", load),
+        patch("adult_sub_monitor.sites.manyvids.asyncio.sleep", new=AsyncMock()),
+    ):
+        result = await site._scrape_creator(
+            AsyncMock(), _creator(), {"101", "102"}, full_scan=True
+        )
+    assert load.await_count == 2
+    assert result.error is None
+    assert [video.video_id for video in result.videos] == ["900", "101", "102"]
+
+
+@pytest.mark.asyncio
 async def test_scrape_creator_follows_pages_until_total_pages() -> None:
     site = _site()
     payload1 = build_store_html([video_spec("1")], regular_total=140)
