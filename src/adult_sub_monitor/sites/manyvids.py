@@ -79,21 +79,26 @@ class StorePage:
 
     @property
     def total_pages(self) -> int:
+        """Pages reachable with ?page=N.
+
+        ManyVids serves store pages only for the regular grid's range: a page
+        past it returns 404 even while the mobile connection still has videos.
+        """
         regular_pages = (
             ceil(self.regular_total / self.regular_page_size)
             if self.regular_page_size
             else 0
         )
-        mobile_pages = (
-            ceil(self.mobile_total / self.mobile_page_size)
-            if self.mobile_page_size
-            else 0
-        )
-        return max(regular_pages, mobile_pages, 1)
+        return max(regular_pages, 1)
+
+    @property
+    def reachable_mobile_total(self) -> int:
+        """Mobile videos that appear within the reachable pages."""
+        return min(self.mobile_total, self.total_pages * self.mobile_page_size)
 
     @property
     def expected_total(self) -> int:
-        return self.regular_total + self.mobile_total
+        return self.regular_total + self.reachable_mobile_total
 
 
 @dataclass

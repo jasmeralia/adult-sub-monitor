@@ -238,8 +238,11 @@ one or more creators. Store pages are parsed from the embedded Relay
 `recordMap` (the chunk can also hold a small profile-header recordMap, so the
 parser picks the one whose `Profile` has `storeVideos` connections), following
 the regular (70 items) and mobile (14 items)
-`storeVideos` connections. Both connections use `?page=N`; `totalCount` and
-connection page sizes determine how many pages to load. Video type comes from
+`storeVideos` connections. Both connections advance with `?page=N`, but
+ManyVids only serves pages within the regular grid's range (a later page returns
+404 even while mobile videos remain), so the page count is
+`ceil(regular totalCount / 70)` (at least 1). Mobile videos beyond that range
+are not reachable from store pages. Video type comes from
 the connection. Routine checks stop paging after the first page on which every
 non-empty connection includes a known numeric video ID: pages are newest
 first, so anything after that is older than what is stored, and one new upload
@@ -474,8 +477,8 @@ first full re-scan.
 ### Full re-scan workflow and pacing
 
 Each ManyVids creator gets a `price-refresh-<site.name>` APScheduler job. It
-loads `ceil(regular_total / 70)` or `ceil(mobile_total / 14)` pages, whichever
-count is larger, using the existing page delays and retry/backoff settings. A
+loads `ceil(regular_total / 70)` pages (at least 1; pages past the regular
+grid return 404), using the existing page delays and retry/backoff settings. A
 single global price lock serializes refreshes; each refresh then takes the
 creator's existing site lock, completes a full scan, records it with
 `record_price_scan` (or records `record_price_scan_failure`), releases the
@@ -493,7 +496,10 @@ one refresh after normal checks.
 
 A full scan records nothing if any page fails, returns 404 or has no videos
 before the last expected page, or if the unique video count does not match page
-1's combined `totalCount`. The error is saved in `price_refresh_state`. Videos
+1's expected total: the regular `totalCount` plus the mobile videos reachable
+within those pages, `min(mobile totalCount, pages * 14)`. Mobile videos beyond
+the regular grid's pages cannot be reached and so are not price-tracked. The
+error is saved in `price_refresh_state`. Videos
 seen in a refresh without a `seen_items` row are ignored; only the normal check
 cycle ingests and notifies new videos.
 
