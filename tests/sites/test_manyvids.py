@@ -285,16 +285,24 @@ def test_parse_store_page_free_video() -> None:
     assert (video.price_cents, video.list_price_cents) == (0, 999)
 
 
-def test_parse_store_page_total_pages_uses_larger_connection() -> None:
+def test_parse_store_page_total_pages_follow_regular_grid() -> None:
+    # Live: a creator with 19 regular and 60 mobile videos returns 404 for
+    # ?page=2, so mobile videos past the regular grid's pages are unreachable.
     store = _parse_store_page(
-        build_store_html([], [], regular_total=10, mobile_total=50)
+        build_store_html([], [], regular_total=19, mobile_total=60)
     )
-    assert store.total_pages == 4
-    assert store.expected_total == 60
+    assert store.total_pages == 1
+    assert store.reachable_mobile_total == 14
+    assert store.expected_total == 33
     store = _parse_store_page(
         build_store_html([], [], regular_total=359, mobile_total=49)
     )
     assert store.total_pages == 6
+    assert store.reachable_mobile_total == 49
+    assert store.expected_total == 408
+    store = _parse_store_page(build_store_html([], [], regular_total=0, mobile_total=5))
+    assert store.total_pages == 1
+    assert store.expected_total == 5
 
 
 def test_parse_store_page_without_mobile_connection() -> None:
@@ -519,6 +527,25 @@ async def test_scrape_creator_new_creator_reads_every_page() -> None:
         result = await site._scrape_creator(AsyncMock(), _creator(), set())
     assert load.await_count == 2
     assert [video.video_id for video in result.videos] == ["1", "2"]
+
+
+@pytest.mark.asyncio
+async def test_full_scan_succeeds_when_mobile_outnumbers_regular_pages() -> None:
+    site = _site()
+    payload = build_store_html(
+        [video_spec(str(i)) for i in range(1, 20)],
+        [video_spec(str(i)) for i in range(100, 114)],
+        regular_total=19,
+        mobile_total=60,
+    )
+    load = AsyncMock(return_value=payload)
+    with patch.object(site, "_load_page", load):
+        result = await site._scrape_creator(
+            AsyncMock(), _creator(), set(), full_scan=True
+        )
+    assert load.await_count == 1
+    assert result.error is None
+    assert len(result.videos) == 33
 
 
 @pytest.mark.asyncio
