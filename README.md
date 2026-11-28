@@ -97,7 +97,7 @@ The `manyvids` config block supports:
 |---|---:|---|
 | `price_refresh_enabled` | `true` | Enable scheduled full-store price scans. |
 | `price_refresh_interval_hours` | `72` | Hours between successful refresh cycles per creator. |
-| `price_refresh_jitter_seconds` | `21600` | Maximum scheduler jitter. |
+| `price_refresh_jitter_seconds` | `21600` | Maximum random delay added to each scheduled scan (APScheduler jitter only delays, never advances). |
 | `price_refresh_stagger_seconds` | `600` | Added spacing between creators' first scheduled scans. |
 
 Consumers can derive sale state from the observation history. A current price
