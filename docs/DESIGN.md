@@ -240,7 +240,10 @@ parser picks the one whose `Profile` has `storeVideos` connections), following
 the regular (70 items) and mobile (14 items)
 `storeVideos` connections. Both connections use `?page=N`; `totalCount` and
 connection page sizes determine how many pages to load. Video type comes from
-the connection, while early-stop behavior uses known numeric video IDs. An
+the connection. Routine checks stop paging after the first page on which every
+non-empty connection includes a known numeric video ID: pages are newest
+first, so anything after that is older than what is stored, and one new upload
+does not walk (and notify) a creator's whole older catalog. An
 unparseable store payload raises an error and is retried instead of being
 treated as an empty page. Set `MANYVIDS_DEBUG_DUMP_DIR` to save such pages as
 HTML for debugging. The scraper also handles retry/backoff for blocked or

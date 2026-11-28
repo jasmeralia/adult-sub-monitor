@@ -406,6 +406,22 @@ def _parse_store_page(  # pylint: disable=too-many-locals,too-many-branches,too-
     )
 
 
+def _reached_known_videos(videos: list[VideoData], known_ids: set[str]) -> bool:
+    """Whether newest-first pagination has caught up with stored videos.
+
+    Store pages are sorted newest first, so once every non-empty connection on a
+    page (regular and mobile page separately) includes a known video, everything
+    after it is older than what is already stored. Stopping there keeps one new
+    upload from walking the whole catalog and notifying old, never-stored videos.
+    """
+    by_type: dict[str, list[str]] = {}
+    for video in videos:
+        by_type.setdefault(video.video_type, []).append(video.video_id)
+    return bool(by_type) and all(
+        any(video_id in known_ids for video_id in ids) for ids in by_type.values()
+    )
+
+
 def _build_page_url(creator_id: str, creator_name: str, page: int) -> str:
     base = f"{BASE_URL}/Profile/{creator_id}/{creator_name}/Store/Videos"
     params = {"sort": "newest"}
@@ -667,12 +683,9 @@ class ManyVidsSite(BaseSite):
                 )
                 break
             all_videos.extend(store_page.videos)
-            if (
-                not full_scan
-                and {video.video_id for video in store_page.videos} <= known_ids
-            ):
+            if not full_scan and _reached_known_videos(store_page.videos, known_ids):
                 logger.info(
-                    "Creator %s: all videos on page %s already known",
+                    "Creator %s: page %s reaches already-known videos, stopping",
                     creator.creator_name,
                     page_num,
                 )
